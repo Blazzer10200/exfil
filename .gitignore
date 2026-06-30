@@ -8,6 +8,9 @@ build/
 src-tauri/target/
 target/
 
+# Built exe (reproducible from build; canonical output is C:\cargo-targets)
+bin/
+
 # Env / secrets
 .env
 .env.*

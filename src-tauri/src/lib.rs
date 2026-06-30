@@ -137,6 +137,9 @@ pub fn run() {
                     let _ = nv.set_vibrance(p.vibrance);
                 }
             }
+            // Re-assert the active ramp on an interval so fullscreen-exclusive
+            // games can't permanently steal the gamma on focus.
+            gamma::start_pulse(1000);
             Ok(())
         })
         .run(tauri::generate_context!())

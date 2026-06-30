@@ -7,7 +7,7 @@
 //! NO injection — SetDeviceGammaRamp is a standard display-driver call.
 
 #[cfg(windows)]
-use windows::Win32::Graphics::Gdi::{CreateDCW, DeleteDC};
+use windows::Win32::Graphics::Gdi::{CreateDCW, DeleteDC, HDC};
 #[cfg(windows)]
 use windows::Win32::UI::ColorSystem::{GetDeviceGammaRamp, SetDeviceGammaRamp};
 #[cfg(windows)]
@@ -53,50 +53,63 @@ pub fn build_ramp(d: ColorDials) -> GammaRamp {
     [channel, channel, channel]
 }
 
+/// Open a gamma-capable DC for every real monitor.
+///
+/// We probe `\\.\DISPLAY1..16` directly rather than `EnumDisplayDevicesW(null,…)`
+/// — on multi-GPU / mixed setups that enumeration returns zero adapters, and the
+/// bare `"DISPLAY"` DC reports success but silently *cannot* read/write gamma
+/// (the cause of the v2 "stuck grayscale on one monitor" bug). A DC is kept only
+/// if `GetDeviceGammaRamp` actually succeeds on it, so callers only ever touch
+/// outputs that genuinely support ramp control.
 #[cfg(windows)]
-fn display_dc() -> windows::Win32::Graphics::Gdi::HDC {
-    // "DISPLAY" device context covers the primary adapter.
-    let name: Vec<u16> = "DISPLAY\0".encode_utf16().collect();
-    unsafe {
-        CreateDCW(
-            PCWSTR(name.as_ptr()),
-            PCWSTR::null(),
-            PCWSTR::null(),
-            None,
-        )
+fn display_dcs() -> Vec<HDC> {
+    let mut dcs = Vec::new();
+    for n in 1..=16u32 {
+        let name: Vec<u16> = format!("\\\\.\\DISPLAY{n}\0").encode_utf16().collect();
+        let dc = unsafe {
+            CreateDCW(PCWSTR(name.as_ptr()), PCWSTR::null(), PCWSTR::null(), None)
+        };
+        if dc.is_invalid() {
+            continue;
+        }
+        // Confirm the DC can actually do gamma before trusting it.
+        let mut probe: GammaRamp = [[0u16; 256]; 3];
+        let ok = unsafe { GetDeviceGammaRamp(dc, probe.as_mut_ptr() as *mut _) };
+        if ok.as_bool() {
+            dcs.push(dc);
+        } else {
+            unsafe { let _ = DeleteDC(dc); }
+        }
     }
+    dcs
 }
-
-/// Read the current gamma ramp from the display.
-#[cfg(windows)]
-pub fn get_ramp() -> Result<GammaRamp, String> {
-    let dc = display_dc();
-    if dc.is_invalid() {
-        return Err("CreateDCW(DISPLAY) failed".into());
-    }
-    let mut ramp: GammaRamp = [[0u16; 256]; 3];
-    let ok = unsafe { GetDeviceGammaRamp(dc, ramp.as_mut_ptr() as *mut _) };
-    unsafe { let _ = DeleteDC(dc); };
-    if ok.as_bool() {
-        Ok(ramp)
-    } else {
-        Err("GetDeviceGammaRamp failed".into())
-    }
-}
-
-/// Apply a gamma ramp to the display.
 #[cfg(windows)]
 pub fn set_ramp(ramp: &GammaRamp) -> Result<(), String> {
-    let dc = display_dc();
-    if dc.is_invalid() {
-        return Err("CreateDCW(DISPLAY) failed".into());
+    let dcs = display_dcs();
+    if dcs.is_empty() {
+        return Err("no display DC available".into());
     }
-    let ok = unsafe { SetDeviceGammaRamp(dc, ramp.as_ptr() as *const _) };
-    unsafe { let _ = DeleteDC(dc); };
-    if ok.as_bool() {
+    let mut any_ok = false;
+    let mut last_err = String::new();
+    for dc in &dcs {
+        let ok = unsafe { SetDeviceGammaRamp(*dc, ramp.as_ptr() as *const _) };
+        if ok.as_bool() {
+            any_ok = true;
+        } else {
+            last_err = "SetDeviceGammaRamp failed (driver may clamp extreme ramps)".into();
+        }
+    }
+    for dc in dcs {
+        unsafe { let _ = DeleteDC(dc); };
+    }
+    if any_ok {
+        // Remember what we last pushed so the re-apply pulse can re-assert it.
+        if let Ok(mut last) = LAST_RAMP.lock() {
+            *last = Some(*ramp);
+        }
         Ok(())
     } else {
-        Err("SetDeviceGammaRamp failed (driver may clamp extreme ramps)".into())
+        Err(last_err)
     }
 }
 
@@ -112,12 +125,48 @@ pub fn reset() -> Result<(), String> {
     apply_dials(ColorDials::default())
 }
 
+// ── Re-apply pulse ──
+// Fullscreen-exclusive games can steal the gamma ramp on focus. We periodically
+// re-assert the last ramp we applied so the active preset survives alt-tabs and
+// game launches. The pulse is a no-op until a ramp has been applied.
+
+#[cfg(windows)]
+static LAST_RAMP: std::sync::Mutex<Option<GammaRamp>> = std::sync::Mutex::new(None);
+#[cfg(windows)]
+static PULSE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Re-assert the last applied ramp once. Cheap; safe to call on a timer.
+#[cfg(windows)]
+pub fn reapply_last() {
+    let ramp = LAST_RAMP.lock().ok().and_then(|g| *g);
+    if let Some(ramp) = ramp {
+        let _ = set_ramp(&ramp);
+    }
+}
+
+/// Start the background re-apply pulse (idempotent). `interval_ms` is clamped to
+/// 250..=60000 to match v1 behaviour.
+#[cfg(windows)]
+pub fn start_pulse(interval_ms: u64) {
+    use std::sync::atomic::Ordering;
+    if PULSE_RUNNING.swap(true, Ordering::SeqCst) {
+        return; // already running
+    }
+    let interval = interval_ms.clamp(250, 60_000);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(interval));
+        reapply_last();
+    });
+}
+
 // ── non-Windows stubs so the crate still type-checks elsewhere ──
-#[cfg(not(windows))]
-pub fn get_ramp() -> Result<GammaRamp, String> { Err("gamma: Windows only".into()) }
 #[cfg(not(windows))]
 pub fn set_ramp(_r: &GammaRamp) -> Result<(), String> { Err("gamma: Windows only".into()) }
 #[cfg(not(windows))]
 pub fn apply_dials(_d: ColorDials) -> Result<(), String> { Err("gamma: Windows only".into()) }
 #[cfg(not(windows))]
 pub fn reset() -> Result<(), String> { Err("gamma: Windows only".into()) }
+#[cfg(not(windows))]
+pub fn reapply_last() {}
+#[cfg(not(windows))]
+pub fn start_pulse(_interval_ms: u64) {}
