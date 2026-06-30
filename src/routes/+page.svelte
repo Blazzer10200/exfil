@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import { RotateCcw, Save, Cpu, CircleAlert } from "lucide-svelte";
   import Titlebar from "$lib/Titlebar.svelte";
   import SlotRail from "$lib/SlotRail.svelte";
@@ -14,6 +15,7 @@
     createPreset,
     deletePreset,
     renamePreset,
+    setBinding,
     type Preset,
     type ColorDials,
     type SystemStatus,
@@ -48,6 +50,8 @@
     vibrance = p.vibrance;
   }
 
+  let unlistenAuto: (() => void) | undefined;
+
   onMount(async () => {
     try {
       const store = await getPresets();
@@ -59,7 +63,20 @@
     } catch (e) {
       flash(String(e), "err");
     }
+
+    // The backend watcher auto-applies a bound preset when its program runs
+    // (and reverts on exit). Re-sync the UI to whatever it switched to.
+    unlistenAuto = await listen<Preset>("auto-switch", (e) => {
+      const p = e.payload;
+      active = p.slot;
+      loadInto(p);
+      const idx = presets.findIndex((x) => x.slot === p.slot);
+      if (idx >= 0) presets[idx] = p;
+      flash(`Auto-switched to ${p.name}`);
+    });
   });
+
+  onMount(() => () => unlistenAuto?.());
 
   async function onSelect(slot: string) {
     if (slot === active || busy) return;
@@ -170,6 +187,18 @@
       flash(String(e), "err");
     }
   }
+
+  // Bind/unbind a program to a slot. Returns the fresh store so binding badges
+  // (and any cleared same-exe binding on another slot) re-sync.
+  async function onBind(slot: string, exe: string | null) {
+    try {
+      const store = await setBinding(slot, exe);
+      presets = store.presets;
+      flash(exe ? `Bound ${exe}` : "Unbound");
+    } catch (e) {
+      flash(String(e), "err");
+    }
+  }
 </script>
 
 <div class="app">
@@ -183,6 +212,7 @@
       oncreate={onCreate}
       ondelete={onDelete}
       onrename={onRename}
+      onbind={onBind}
     />
 
     <main class="panel">

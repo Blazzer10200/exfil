@@ -13,6 +13,10 @@ pub struct Preset {
     pub name: String,
     pub dials: ColorDials,
     pub vibrance: i32, // 0..=63 (NVAPI Ex scale)
+    /// Bound program: a lowercased exe basename (e.g. "cs2.exe"). When that
+    /// process is running, the watcher auto-applies this preset; None = unbound.
+    #[serde(default)]
+    pub exe: Option<String>,
 }
 
 fn default_next_id() -> u32 {
@@ -33,6 +37,7 @@ fn normal_preset() -> Preset {
         name: "Normal".into(),
         dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
         vibrance: 0,
+        exe: None,
     }
 }
 
@@ -99,6 +104,7 @@ impl PresetStore {
             name,
             dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
             vibrance: 0,
+            exe: None,
         };
         self.presets.push(preset.clone());
         preset
@@ -137,5 +143,40 @@ impl PresetStore {
             }
             None => Err("unknown slot".into()),
         }
+    }
+
+    /// Bind (or clear, with `None`) a program to a user preset. The exe is stored
+    /// lowercased so process matching is case-insensitive. Normal is protected.
+    /// Any other preset bound to the same exe is cleared so an exe maps to one slot.
+    pub fn set_binding(&mut self, slot: &str, exe: Option<String>) -> Result<(), String> {
+        if slot == "Normal" {
+            return Err("Normal baseline cannot be bound".into());
+        }
+        let exe = exe.and_then(|e| {
+            let e = e.trim().to_lowercase();
+            if e.is_empty() { None } else { Some(e) }
+        });
+        if self.presets.iter().all(|p| p.slot != slot) {
+            return Err("unknown slot".into());
+        }
+        if let Some(ref target) = exe {
+            for p in self.presets.iter_mut() {
+                if p.slot != slot && p.exe.as_deref() == Some(target.as_str()) {
+                    p.exe = None;
+                }
+            }
+        }
+        if let Some(p) = self.presets.iter_mut().find(|p| p.slot == slot) {
+            p.exe = exe;
+        }
+        Ok(())
+    }
+
+    /// All (exe, slot) bindings currently set, exe lowercased.
+    pub fn bindings(&self) -> Vec<(String, String)> {
+        self.presets
+            .iter()
+            .filter_map(|p| p.exe.clone().map(|e| (e, p.slot.clone())))
+            .collect()
     }
 }

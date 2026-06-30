@@ -4,6 +4,7 @@
 mod gamma;
 mod nvapi;
 mod store;
+mod watcher;
 
 use gamma::ColorDials;
 use nvapi::{Nvapi, VibranceInfo};
@@ -12,7 +13,7 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, State, WindowEvent,
+    Emitter, Manager, State, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -21,6 +22,9 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 struct AppState {
     nvapi: Option<Nvapi>,
     store: Mutex<PresetStore>,
+    /// The slot the USER last picked by hand. The watcher reverts here when no
+    /// bound program is running (revert-to-last-manual-pick).
+    manual_active: Mutex<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -63,10 +67,22 @@ fn apply_color(
 /// programmed it to. All other slots stamp their stored dials + vibrance.
 #[tauri::command]
 fn select_preset(state: State<AppState>, slot: String) -> Result<Preset, String> {
+    let preset = apply_slot(&state, &slot)?;
+    // A hand-pick becomes the revert target the watcher falls back to.
+    *state.manual_active.lock().unwrap() = slot;
+    Ok(preset)
+}
+
+/// Apply a slot's color to the display and mark it active in the store (persisted).
+/// Shared by the manual `select_preset` command and the auto-switch watcher, so
+/// both paths drive the exact same gamma/vibrance + active-state logic.
+/// "Normal" restores each monitor's NATIVE color (neutral gamma + per-monitor
+/// default vibrance); other slots stamp their stored dials + vibrance.
+fn apply_slot(state: &AppState, slot: &str) -> Result<Preset, String> {
     let preset = {
         let mut s = state.store.lock().unwrap();
-        let p = s.get(&slot).cloned().ok_or("unknown slot")?;
-        s.active = slot.clone();
+        let p = s.get(slot).cloned().ok_or("unknown slot")?;
+        s.active = slot.to_string();
         p
     };
     if slot == "Normal" {
@@ -126,6 +142,29 @@ fn rename_preset(state: State<AppState>, slot: String, name: String) -> Result<(
     s.save()
 }
 
+/// Bind a program (`exe`, e.g. "cs2.exe") to a slot, or clear with `exe = None`.
+/// Returns the fresh store so the frontend re-syncs binding badges. When that
+/// program runs, the watcher auto-applies this preset; on exit it reverts to the
+/// last manual pick.
+#[tauri::command]
+fn set_binding(
+    state: State<AppState>,
+    slot: String,
+    exe: Option<String>,
+) -> Result<PresetStore, String> {
+    let mut s = state.store.lock().unwrap();
+    s.set_binding(&slot, exe)?;
+    s.save()?;
+    Ok(s.clone())
+}
+
+/// List distinct running process exe basenames (lowercased, system noise filtered)
+/// for the "pick from running programs" binder. Read-only enumeration — no injection.
+#[tauri::command]
+fn list_processes() -> Vec<String> {
+    watcher::list_running_exes()
+}
+
 /// Reset display to neutral gamma + every monitor's native default vibrance.
 fn do_reset(state: &AppState) {
     let _ = gamma::reset();
@@ -155,6 +194,7 @@ pub fn run() {
     let state = AppState {
         nvapi,
         store: Mutex::new(PresetStore::load()),
+        manual_active: Mutex::new(PresetStore::load().active),
     };
 
     tauri::Builder::default()
@@ -162,6 +202,7 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -172,6 +213,8 @@ pub fn run() {
             create_preset,
             delete_preset,
             rename_preset,
+            set_binding,
+            list_processes,
             reset_display,
         ])
         .setup(|app| {
@@ -258,6 +301,31 @@ pub fn run() {
             // Re-assert the active ramp on an interval so fullscreen-exclusive
             // games can't permanently steal the gamma on focus.
             gamma::start_pulse(1000);
+
+            // ── Per-program auto-switch ──
+            // Poll running processes (~2s). When a bound program is the most-recent
+            // running one, apply its preset; when the last bound program exits,
+            // revert to the user's last manual pick. Read-only enumeration — no
+            // injection. The frontend listens for "auto-switch" to re-sync the UI.
+            {
+                let handle = app.handle().clone();
+                let bindings = {
+                    let h = handle.clone();
+                    move || h.state::<AppState>().store.lock().unwrap().bindings()
+                };
+                let on_change = {
+                    let h = handle.clone();
+                    move |winner: Option<String>| {
+                        let state = h.state::<AppState>();
+                        let slot = winner
+                            .unwrap_or_else(|| state.manual_active.lock().unwrap().clone());
+                        if let Ok(p) = apply_slot(&state, &slot) {
+                            let _ = h.emit("auto-switch", &p);
+                        }
+                    }
+                };
+                watcher::start(2000, bindings, on_change);
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

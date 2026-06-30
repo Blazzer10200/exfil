@@ -14,6 +14,7 @@ export interface Preset {
   name: string;
   dials: ColorDials;
   vibrance: number; // 0..63 (NVAPI Ex scale)
+  exe?: string | null; // bound program (lowercased exe basename) or null
 }
 
 export interface PresetStore {
@@ -57,6 +58,13 @@ export const deletePreset = (slot: string) =>
 
 export const renamePreset = (slot: string, name: string) =>
   invoke<void>("rename_preset", { slot, name });
+
+// Program binding. setBinding returns the fresh store (binding badges re-sync);
+// pass exe = null to clear. listProcesses → running exe basenames for the picker.
+export const setBinding = (slot: string, exe: string | null) =>
+  invoke<PresetStore>("set_binding", { slot, exe });
+
+export const listProcesses = () => invoke<string[]>("list_processes");
 
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).

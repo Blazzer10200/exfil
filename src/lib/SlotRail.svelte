@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Preset } from "./api";
-  import { slotAccent } from "./api";
-  import { Pencil, Trash2, Lock } from "lucide-svelte";
+  import { slotAccent, listProcesses } from "./api";
+  import { Pencil, Trash2, Lock, Link2, Unlink } from "lucide-svelte";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
   interface Props {
     presets: Preset[];
@@ -10,8 +11,9 @@
     oncreate: () => void;
     ondelete: (slot: string) => void;
     onrename: (slot: string, name: string) => void;
+    onbind: (slot: string, exe: string | null) => void;
   }
-  let { presets, active, onselect, oncreate, ondelete, onrename }: Props =
+  let { presets, active, onselect, oncreate, ondelete, onrename, onbind }: Props =
     $props();
 
   // Accent index = position among non-Normal presets (Normal is fixed grey).
@@ -56,7 +58,7 @@
   // Menu width/height are fixed enough to clamp against the viewport so it
   // never spills off-screen near the window edges.
   const MENU_W = 168;
-  const MENU_H = 92;
+  const MENU_H = 132;
   let menu = $state<{ slot: string; x: number; y: number } | null>(null);
 
   function openMenu(e: MouseEvent, slot: string) {
@@ -74,6 +76,66 @@
   }
   function menuDelete() {
     if (menu) ondelete(menu.slot);
+    closeMenu();
+  }
+
+  // ── Program binding ──
+  // "Bind to program" opens a chooser: browse for an .exe via the OS file
+  // dialog, OR pick from the live running-process list. Binding stores the exe
+  // basename; the backend watcher auto-applies this preset when it runs.
+  let binder = $state<{ slot: string } | null>(null);
+  let procs = $state<string[]>([]);
+  let procFilter = $state("");
+
+  let filteredProcs = $derived(
+    procFilter.trim()
+      ? procs.filter((p) => p.includes(procFilter.trim().toLowerCase()))
+      : procs,
+  );
+
+  function boundExe(slot: string): string | null {
+    return presets.find((p) => p.slot === slot)?.exe ?? null;
+  }
+
+  async function openBinder() {
+    if (!menu) return;
+    const slot = menu.slot;
+    closeMenu();
+    binder = { slot };
+    procFilter = "";
+    procs = [];
+    try {
+      procs = await listProcesses();
+    } catch {
+      procs = [];
+    }
+  }
+  function closeBinder() {
+    binder = null;
+  }
+  async function browseExe() {
+    if (!binder) return;
+    const slot = binder.slot;
+    const picked = await openDialog({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Programs", extensions: ["exe"] }],
+    });
+    if (typeof picked === "string") {
+      const base = picked.split(/[\\/]/).pop()?.toLowerCase() ?? "";
+      if (base) {
+        onbind(slot, base);
+        closeBinder();
+      }
+    }
+  }
+  function pickProc(exe: string) {
+    if (!binder) return;
+    onbind(binder.slot, exe);
+    closeBinder();
+  }
+  function menuUnbind() {
+    if (menu) onbind(menu.slot, null);
     closeMenu();
   }
 </script>
@@ -114,6 +176,12 @@
             <span class="label">{p.name}</span>
           {/if}
         </button>
+        {#if p.slot !== "Normal" && p.exe}
+          <span class="bound" title="Auto-switches when {p.exe} is running">
+            <Link2 size={10} />
+            {p.exe}
+          </span>
+        {/if}
       </div>
     {/each}
   </div>
@@ -145,11 +213,54 @@
         <Pencil size={14} />
         <span>Rename</span>
       </button>
+      <button class="ctx-item" role="menuitem" onclick={openBinder}>
+        <Link2 size={14} />
+        <span>Bind to program…</span>
+      </button>
+      {#if boundExe(menu.slot)}
+        <button class="ctx-item" role="menuitem" onclick={menuUnbind}>
+          <Unlink size={14} />
+          <span>Unbind</span>
+        </button>
+      {/if}
       <button class="ctx-item danger" role="menuitem" onclick={menuDelete}>
         <Trash2 size={14} />
         <span>Delete</span>
       </button>
     {/if}
+  </div>
+{/if}
+
+{#if binder}
+  <button
+    class="menu-backdrop modal"
+    aria-label="Close binder"
+    onclick={closeBinder}
+  ></button>
+  <div class="binder" role="dialog" aria-label="Bind program to preset">
+    <header class="binder-head">
+      <span>Bind a program</span>
+      <span class="binder-sub">
+        Auto-applies this preset while the program runs.
+      </span>
+    </header>
+    <button class="browse" onclick={browseExe}>
+      <Link2 size={14} />
+      Browse for .exe…
+    </button>
+    <div class="binder-or">or pick a running program</div>
+    <input
+      class="proc-filter"
+      placeholder="Filter…"
+      bind:value={procFilter}
+    />
+    <div class="proc-list">
+      {#each filteredProcs as exe (exe)}
+        <button class="proc" onclick={() => pickProc(exe)}>{exe}</button>
+      {:else}
+        <div class="proc-empty">No matching processes</div>
+      {/each}
+    </div>
   </div>
 {/if}
 
@@ -320,4 +431,110 @@
     font-size: var(--fs-xs);
   }
   .ctx-item.locked:hover { background: transparent; color: var(--fg-faint); }
+
+  /* ── Bound-program badge ── */
+  .bound {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    max-width: 64px;
+    margin-right: 8px;
+    padding: 2px 5px;
+    border-radius: var(--radius-xs);
+    background: color-mix(in oklab, var(--slot-accent) 16%, transparent);
+    color: color-mix(in oklab, var(--slot-accent) 90%, var(--fg));
+    font-size: 10px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── Binder modal ── */
+  .menu-backdrop.modal { z-index: 60; background: color-mix(in oklab, #000 38%, transparent); }
+  .binder {
+    position: fixed;
+    z-index: 70;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 320px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg, 12px);
+    box-shadow: var(--shadow);
+  }
+  .binder-head { display: flex; flex-direction: column; gap: 2px; }
+  .binder-head > span:first-child { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
+  .binder-sub { font-size: var(--fs-xs); color: var(--fg-muted); }
+  .browse {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 9px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-strong);
+    background: var(--field);
+    color: var(--fg-2);
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .browse:hover { background: var(--surface-hover); color: var(--fg); }
+  .binder-or {
+    text-align: center;
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
+  }
+  .proc-filter {
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--field);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    outline: none;
+  }
+  .proc-filter:focus { border-color: var(--border-focus); }
+  .proc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    overflow-y: auto;
+    min-height: 0;
+    flex: 1;
+  }
+  .proc {
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: var(--fg-2);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 100ms ease;
+  }
+  .proc:hover { background: var(--surface-hover); color: var(--fg); }
+  .proc-empty {
+    padding: 12px;
+    text-align: center;
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
+  }
 </style>
