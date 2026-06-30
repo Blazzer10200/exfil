@@ -9,7 +9,12 @@ use gamma::ColorDials;
 use nvapi::{Nvapi, VibranceInfo};
 use store::{Preset, PresetStore};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, State, WindowEvent,
+};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 /// Shared app state. NVAPI handle is optional — non-NVIDIA machines still run
 /// (gamma works; vibrance commands return a clean error).
@@ -95,13 +100,44 @@ fn save_preset(
     s.save()
 }
 
-/// Reset display to neutral gamma + every monitor's native default vibrance (panic button).
+/// Create a new user preset (seeded neutral) and return it. Frontend appends + selects it.
 #[tauri::command]
-fn reset_display(state: State<AppState>) -> Result<(), String> {
-    gamma::reset()?;
+fn create_preset(state: State<AppState>, name: String) -> Result<Preset, String> {
+    let mut s = state.store.lock().unwrap();
+    let p = s.add(name);
+    s.save()?;
+    Ok(p)
+}
+
+/// Delete a user preset; returns the fresh store so the frontend re-syncs list + active.
+#[tauri::command]
+fn delete_preset(state: State<AppState>, slot: String) -> Result<PresetStore, String> {
+    let mut s = state.store.lock().unwrap();
+    s.delete(&slot)?;
+    s.save()?;
+    Ok(s.clone())
+}
+
+/// Rename a user preset (display name only; Normal is read-only).
+#[tauri::command]
+fn rename_preset(state: State<AppState>, slot: String, name: String) -> Result<(), String> {
+    let mut s = state.store.lock().unwrap();
+    s.rename(&slot, name)?;
+    s.save()
+}
+
+/// Reset display to neutral gamma + every monitor's native default vibrance.
+fn do_reset(state: &AppState) {
+    let _ = gamma::reset();
     if let Some(nv) = state.nvapi.as_ref() {
         let _ = nv.reset_vibrance_to_default();
     }
+}
+
+/// Reset display to neutral gamma + every monitor's native default vibrance (panic button).
+#[tauri::command]
+fn reset_display(state: State<AppState>) -> Result<(), String> {
+    do_reset(&state);
     Ok(())
 }
 
@@ -123,6 +159,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -130,9 +170,73 @@ pub fn run() {
             apply_color,
             select_preset,
             save_preset,
+            create_preset,
+            delete_preset,
+            rename_preset,
             reset_display,
         ])
         .setup(|app| {
+            // Run on Windows startup (hidden to tray). Idempotent — safe each boot.
+            let _ = app.autolaunch().enable();
+
+            // ── System tray: Show / Reset display / Quit ──
+            let show_i = MenuItem::with_id(app, "show", "Show EXFIL", true, None::<&str>)?;
+            let reset_i = MenuItem::with_id(app, "reset", "Reset display", true, None::<&str>)?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_i, &reset_i, &quit_i])?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("EXFIL")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "reset" => do_reset(&app.state::<AppState>()),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    // Left-click the tray icon → show + focus the window.
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            // ── Close-to-tray: the X (and titlebar close) hides instead of quitting ──
+            if let Some(window) = app.get_webview_window("main") {
+                let w = window.clone();
+                window.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = w.hide();
+                    }
+                });
+
+                // Start hidden when autostarted (--hidden); otherwise show normally.
+                let hidden = std::env::args().any(|a| a == "--hidden");
+                if hidden {
+                    let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                }
+            }
+
             // Apply the last-active preset on boot so the display matches UI.
             let state = app.state::<AppState>();
             let active = {
@@ -141,10 +245,7 @@ pub fn run() {
             };
             if let Some(p) = active {
                 if state.store.lock().unwrap().active == "Normal" {
-                    let _ = gamma::reset();
-                    if let Some(nv) = state.nvapi.as_ref() {
-                        let _ = nv.reset_vibrance_to_default();
-                    }
+                    do_reset(&state);
                 } else {
                     let _ = gamma::apply_dials(p.dials);
                     if let Some(nv) = state.nvapi.as_ref() {

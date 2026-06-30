@@ -48,11 +48,15 @@
   /* cyan = ambient telemetry (EXFIL rule) */
   --telemetry:     oklch(0.80 0.12 215);
 
-  /* per-preset accents — neutral / amber / indigo / coral (EXFIL slots) */
+  /* preset accents — Normal is fixed neutral grey; user presets cycle a
+     6-hue palette keyed by index (see api.ts slotAccent / ACCENT_CYCLE). */
   --slot-normal:   oklch(0.70 0.013 258);   /* neutral grey for baseline */
-  --slot-p1:       oklch(0.80 0.15 75);      /* amber */
-  --slot-p2:       oklch(0.62 0.16 270);     /* indigo */
-  --slot-p3:       oklch(0.72 0.17 25);      /* coral */
+  --slot-a:        oklch(0.80 0.15 75);      /* amber  */
+  --slot-b:        oklch(0.62 0.16 270);     /* indigo */
+  --slot-c:        oklch(0.72 0.17 25);      /* coral  */
+  --slot-d:        oklch(0.78 0.13 180);     /* teal   */
+  --slot-e:        oklch(0.66 0.16 320);     /* violet */
+  --slot-f:        oklch(0.80 0.15 130);     /* green  */
 
   /* status semantics */
   --ok:            oklch(0.73 0.18 150);
@@ -85,7 +89,7 @@
   --font-ui:  "Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif;
   --font-mono:"JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   --titlebar-h: 34px;
-  --rail-w: 60px;
+  --rail-w: 168px;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;

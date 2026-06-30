@@ -19,6 +19,7 @@ export interface Preset {
 export interface PresetStore {
   presets: Preset[];
   active: string;
+  next_id: number;
 }
 
 export interface VibranceInfo {
@@ -47,13 +48,28 @@ export const savePreset = (slot: string, dials: ColorDials, vibrance: number) =>
 
 export const resetDisplay = () => invoke<void>("reset_display");
 
-// Per-slot accent CSS var (matches app.css --slot-* tokens).
-export const slotAccent = (slot: string): string => {
-  const map: Record<string, string> = {
-    Normal: "var(--slot-normal)",
-    Preset1: "var(--slot-p1)",
-    Preset2: "var(--slot-p2)",
-    Preset3: "var(--slot-p3)",
-  };
-  return map[slot] ?? "var(--accent)";
+// Preset CRUD. create returns the new preset; delete returns the fresh store.
+export const createPreset = (name: string) =>
+  invoke<Preset>("create_preset", { name });
+
+export const deletePreset = (slot: string) =>
+  invoke<PresetStore>("delete_preset", { slot });
+
+export const renamePreset = (slot: string, name: string) =>
+  invoke<void>("rename_preset", { slot, name });
+
+// Accent palette cycled by a preset's position among non-Normal presets.
+// Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).
+const ACCENT_CYCLE = [
+  "var(--slot-a)",
+  "var(--slot-b)",
+  "var(--slot-c)",
+  "var(--slot-d)",
+  "var(--slot-e)",
+  "var(--slot-f)",
+];
+
+export const slotAccent = (slot: string, index = 0): string => {
+  if (slot === "Normal") return "var(--slot-normal)";
+  return ACCENT_CYCLE[index % ACCENT_CYCLE.length];
 };

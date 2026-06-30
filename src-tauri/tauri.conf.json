@@ -49,5 +49,10 @@
       }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "autostart": {
+      "macosLauncher": "LaunchAgent",
+      "args": ["--hidden"]
+    }
+  }
 }

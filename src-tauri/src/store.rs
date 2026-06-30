@@ -1,5 +1,7 @@
 //! Preset persistence — JSON at %APPDATA%\exfil-v2\presets.json.
-//! 4 slots: Normal (native baseline, read-only), Preset 1, Preset 2, Preset 3.
+//! Model: a fixed read-only "Normal" native baseline plus user-created presets.
+//! User presets get stable keys `p{n}` from a monotonic `next_id` (never reused),
+//! so renames change only the display name and deletions never collide.
 
 use crate::gamma::ColorDials;
 use serde::{Deserialize, Serialize};
@@ -13,28 +15,33 @@ pub struct Preset {
     pub vibrance: i32, // 0..=63 (NVAPI Ex scale)
 }
 
+fn default_next_id() -> u32 {
+    1
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetStore {
     pub presets: Vec<Preset>,
     pub active: String,
+    #[serde(default = "default_next_id")]
+    pub next_id: u32,
+}
+
+fn normal_preset() -> Preset {
+    Preset {
+        slot: "Normal".into(),
+        name: "Normal".into(),
+        dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
+        vibrance: 0,
+    }
 }
 
 impl Default for PresetStore {
     fn default() -> Self {
-        let mk = |slot: &str, name: &str, g: f64, b: f64, c: f64, v: i32| Preset {
-            slot: slot.into(),
-            name: name.into(),
-            dials: ColorDials { gamma: g, brightness: b, contrast: c },
-            vibrance: v,
-        };
         PresetStore {
-            presets: vec![
-                mk("Normal", "Normal", 1.0, 0.0, 1.0, 0),
-                mk("Preset1", "Preset 1", 1.15, 0.05, 1.10, 28),
-                mk("Preset2", "Preset 2", 0.90, -0.05, 1.05, 16),
-                mk("Preset3", "Preset 3", 1.0, 0.0, 1.0, 20),
-            ],
+            presets: vec![normal_preset()],
             active: "Normal".into(),
+            next_id: 1,
         }
     }
 }
@@ -75,6 +82,60 @@ impl PresetStore {
         if let Some(p) = self.presets.iter_mut().find(|p| p.slot == slot) {
             p.dials = dials;
             p.vibrance = vibrance;
+        }
+    }
+
+    /// Create a new user preset seeded neutral. Returns a clone of the new preset.
+    pub fn add(&mut self, name: String) -> Preset {
+        let slot = format!("p{}", self.next_id);
+        self.next_id += 1;
+        let name = if name.trim().is_empty() {
+            format!("Preset {}", self.presets.len())
+        } else {
+            name.trim().into()
+        };
+        let preset = Preset {
+            slot,
+            name,
+            dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
+            vibrance: 0,
+        };
+        self.presets.push(preset.clone());
+        preset
+    }
+
+    /// Delete a user preset. Normal is protected. If the deleted slot was active,
+    /// active falls back to Normal.
+    pub fn delete(&mut self, slot: &str) -> Result<(), String> {
+        if slot == "Normal" {
+            return Err("Normal baseline cannot be deleted".into());
+        }
+        let before = self.presets.len();
+        self.presets.retain(|p| p.slot != slot);
+        if self.presets.len() == before {
+            return Err("unknown slot".into());
+        }
+        if self.active == slot {
+            self.active = "Normal".into();
+        }
+        Ok(())
+    }
+
+    /// Rename a user preset (display name only). Normal is protected.
+    pub fn rename(&mut self, slot: &str, name: String) -> Result<(), String> {
+        if slot == "Normal" {
+            return Err("Normal baseline cannot be renamed".into());
+        }
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("name cannot be empty".into());
+        }
+        match self.presets.iter_mut().find(|p| p.slot == slot) {
+            Some(p) => {
+                p.name = name.into();
+                Ok(())
+            }
+            None => Err("unknown slot".into()),
         }
     }
 }

@@ -9,10 +9,20 @@ with a Rift-inspired dark UI. A from-scratch port of the .NET EXFIL v1.
   Applied to **every gamma-capable monitor** (`\\.\DISPLAY1..N`, probed directly).
 - **Digital vibrance** — NVAPI (`SetDVCLevelEx`, 0..=63 ex-scale) via raw `nvapi64.dll` `QueryInterface`.
   Applied to **every connected NVIDIA output** — so a second monitor can't keep a stale value.
-- **Four preset slots** — Normal (native baseline), Preset 1, Preset 2, Preset 3.
-  Persisted to `%APPDATA%\exfil-v2\presets.json`. Last-active preset re-applied on boot.
-  **Normal** restores each monitor's NATIVE color — neutral gamma + per-monitor default vibrance —
-  so the display picks up exactly what Windows/the driver programmed it to.
+- **Your own presets** — a fixed read-only **Normal** baseline plus presets you
+  **create, name, rename, and delete** yourself, each tuned live from the main color
+  controls. Persisted to `%APPDATA%\exfil-v2\presets.json`; last-active preset
+  re-applied on boot. **Normal** restores each monitor's NATIVE color — neutral gamma
+  + per-monitor default vibrance — so the display picks up exactly what Windows/the
+  driver programmed it to. (User presets get stable internal keys `p{n}` from a
+  monotonic counter, so renames touch only the display name and deleted keys never
+  collide.)
+- **Lives in the tray** — runs in the background from a system-tray icon. Left-click
+  the icon (or **Show EXFIL** in its menu) opens the window; the menu also has
+  **Reset display** and **Quit**. Closing the window (X) **hides to tray** instead of
+  quitting — the active ramp keeps being re-asserted.
+- **Starts with Windows** — registers an autostart entry (HKCU Run key) and launches
+  **hidden to the tray** (`--hidden`) on login, so your last look is applied from boot.
 
 No DLL injection — every write goes through the Windows display driver / NVAPI, so it's
 BattlEye / EAC-safe. No telemetry.

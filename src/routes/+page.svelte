@@ -11,6 +11,9 @@
     selectPreset,
     savePreset,
     resetDisplay,
+    createPreset,
+    deletePreset,
+    renamePreset,
     type Preset,
     type ColorDials,
     type SystemStatus,
@@ -117,13 +120,70 @@
       busy = false;
     }
   }
+
+  // ── Preset CRUD ──
+  async function onCreate() {
+    if (busy) return;
+    busy = true;
+    try {
+      const p = await createPreset(""); // backend auto-names "Preset N"
+      presets = [...presets, p];
+      // Select it so the user tunes the fresh preset live straight away.
+      await selectPreset(p.slot);
+      active = p.slot;
+      loadInto(p);
+      flash(`Created ${p.name}`);
+    } catch (e) {
+      flash(String(e), "err");
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function onDelete(slot: string) {
+    if (busy || slot === "Normal") return;
+    busy = true;
+    try {
+      const store = await deletePreset(slot);
+      presets = store.presets;
+      active = store.active;
+      const p = presets.find((x) => x.slot === active);
+      if (p) {
+        // Deleting the active slot falls back to Normal → re-apply it.
+        await selectPreset(active);
+        loadInto(p);
+      }
+      flash("Preset deleted");
+    } catch (e) {
+      flash(String(e), "err");
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function onRename(slot: string, name: string) {
+    try {
+      await renamePreset(slot, name);
+      const idx = presets.findIndex((x) => x.slot === slot);
+      if (idx >= 0) presets[idx] = { ...presets[idx], name };
+    } catch (e) {
+      flash(String(e), "err");
+    }
+  }
 </script>
 
 <div class="app">
   <Titlebar />
 
   <div class="body">
-    <SlotRail {presets} {active} onselect={onSelect} />
+    <SlotRail
+      {presets}
+      {active}
+      onselect={onSelect}
+      oncreate={onCreate}
+      ondelete={onDelete}
+      onrename={onRename}
+    />
 
     <main class="panel">
       <header class="hero">
