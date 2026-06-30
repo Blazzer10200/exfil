@@ -158,7 +158,6 @@ pub fn run() {
     };
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -199,6 +198,9 @@ pub fn run() {
                     }
                     "reset" => do_reset(&app.state::<AppState>()),
                     "quit" => app.exit(0),
+                    // NB: native-restore on quit is handled centrally in the
+                    // RunEvent::Exit handler below, so EVERY exit path (tray
+                    // Quit, OS shutdown, app.exit) leaves the screen at native.
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -258,6 +260,14 @@ pub fn run() {
             gamma::start_pulse(1000);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running EXFIL");
+        .build(tauri::generate_context!())
+        .expect("error while building EXFIL")
+        .run(|app, event| {
+            // Restore native display on the way out so quitting (tray Quit, OS
+            // shutdown, app.exit) never leaves a preset's gamma/vibrance stamped
+            // on the monitors with no app left to clear it.
+            if let tauri::RunEvent::Exit = event {
+                do_reset(&app.state::<AppState>());
+            }
+        });
 }

@@ -15,7 +15,7 @@
     <button class="winbtn" title="Minimize" onclick={() => appWindow.minimize()}>
       <Minus size={15} />
     </button>
-    <button class="winbtn close" title="Close" onclick={() => appWindow.close()}>
+    <button class="winbtn close" title="Close to tray" onclick={() => appWindow.hide()}>
       <X size={15} />
     </button>
   </div>

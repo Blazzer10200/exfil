@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Preset } from "./api";
   import { slotAccent } from "./api";
+  import { Pencil, Trash2, Lock } from "lucide-svelte";
 
   interface Props {
     presets: Preset[];
@@ -27,9 +28,11 @@
   let editing = $state<string | null>(null);
   let draft = $state("");
 
-  function startRename(p: Preset) {
-    if (p.slot === "Normal") return;
-    editing = p.slot;
+  function startRename(slot: string) {
+    if (slot === "Normal") return;
+    const p = presets.find((x) => x.slot === slot);
+    if (!p) return;
+    editing = slot;
     draft = p.name;
   }
   function commitRename() {
@@ -48,20 +51,52 @@
       editing = null;
     }
   }
+
+  // ── Right-click context menu ──
+  // Menu width/height are fixed enough to clamp against the viewport so it
+  // never spills off-screen near the window edges.
+  const MENU_W = 168;
+  const MENU_H = 92;
+  let menu = $state<{ slot: string; x: number; y: number } | null>(null);
+
+  function openMenu(e: MouseEvent, slot: string) {
+    e.preventDefault();
+    const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
+    const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
+    menu = { slot, x: Math.max(8, x), y: Math.max(8, y) };
+  }
+  function closeMenu() {
+    menu = null;
+  }
+  function menuRename() {
+    if (menu) startRename(menu.slot);
+    closeMenu();
+  }
+  function menuDelete() {
+    if (menu) ondelete(menu.slot);
+    closeMenu();
+  }
 </script>
 
+<svelte:window
+  onkeydown={(e) => e.key === "Escape" && closeMenu()}
+  onblur={closeMenu}
+/>
+
 <nav class="rail">
-  <div class="slots">
+  <div class="slots" onscroll={closeMenu}>
     {#each presets as p (p.slot)}
       <div
         class="slot"
         class:active={p.slot === active}
+        class:targeted={menu?.slot === p.slot}
         style="--slot-accent: {slotAccent(p.slot, accentIndex(p.slot))}"
       >
         <button
           class="pick"
           onclick={() => onselect(p.slot)}
-          ondblclick={() => startRename(p)}
+          ondblclick={() => startRename(p.slot)}
+          oncontextmenu={(e) => openMenu(e, p.slot)}
           title={p.slot === "Normal" ? "Native baseline" : p.name}
         >
           <span class="dot"></span>
@@ -79,18 +114,6 @@
             <span class="label">{p.name}</span>
           {/if}
         </button>
-        {#if p.slot !== "Normal" && editing !== p.slot}
-          <button
-            class="trash"
-            title="Delete preset"
-            onclick={() => ondelete(p.slot)}
-            aria-label="Delete {p.name}"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-            </svg>
-          </button>
-        {/if}
       </div>
     {/each}
   </div>
@@ -99,6 +122,36 @@
     <span class="plus">+</span> New preset
   </button>
 </nav>
+
+{#if menu}
+  <!-- Backdrop swallows the next click so the menu dismisses cleanly. -->
+  <button
+    class="menu-backdrop"
+    aria-label="Close menu"
+    onclick={closeMenu}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      closeMenu();
+    }}
+  ></button>
+  <div class="ctxmenu" style="left: {menu.x}px; top: {menu.y}px;" role="menu">
+    {#if menu.slot === "Normal"}
+      <div class="ctx-item locked" role="menuitem" aria-disabled="true">
+        <Lock size={14} />
+        <span>Native baseline — locked</span>
+      </div>
+    {:else}
+      <button class="ctx-item" role="menuitem" onclick={menuRename}>
+        <Pencil size={14} />
+        <span>Rename</span>
+      </button>
+      <button class="ctx-item danger" role="menuitem" onclick={menuDelete}>
+        <Trash2 size={14} />
+        <span>Delete</span>
+      </button>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .rail {
@@ -131,6 +184,9 @@
   .slot.active {
     background: color-mix(in oklab, var(--slot-accent) 14%, transparent);
     border-color: color-mix(in oklab, var(--slot-accent) 40%, transparent);
+  }
+  .slot.targeted {
+    border-color: color-mix(in oklab, var(--slot-accent) 60%, transparent);
   }
   .pick {
     display: flex;
@@ -181,22 +237,6 @@
     outline: none;
   }
   .rename:focus { border-color: var(--border-focus); }
-  .trash {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 30px;
-    flex-shrink: 0;
-    background: transparent;
-    border: none;
-    color: var(--fg-faint);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease, color 120ms ease;
-  }
-  .slot:hover .trash { opacity: 1; }
-  .trash:hover { color: var(--danger); }
   .new {
     display: flex;
     align-items: center;
@@ -220,4 +260,64 @@
     border-color: var(--fg-faint);
   }
   .plus { font-size: 15px; line-height: 1; }
+
+  /* ── Context menu ── */
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: default;
+  }
+  .ctxmenu {
+    position: fixed;
+    z-index: 50;
+    width: 168px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    animation: ctx-in 90ms ease;
+    transform-origin: top left;
+  }
+  @keyframes ctx-in {
+    from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 9px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--fg-2);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .ctx-item:hover {
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
+  .ctx-item.danger:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .ctx-item.locked {
+    color: var(--fg-faint);
+    cursor: default;
+    font-size: var(--fs-xs);
+  }
+  .ctx-item.locked:hover { background: transparent; color: var(--fg-faint); }
 </style>
