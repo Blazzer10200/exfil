@@ -48,11 +48,5 @@
         "type": "embedBootstrapper"
       }
     }
-  },
-  "plugins": {
-    "autostart": {
-      "macosLauncher": "LaunchAgent",
-      "args": ["--hidden"]
-    }
   }
 }
