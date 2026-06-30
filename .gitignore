@@ -1,0 +1,21 @@
+# Node / SvelteKit
+node_modules/
+build/
+.svelte-kit/
+*.log
+
+# Rust (target is C:\cargo-targets, but ignore local target/ too)
+src-tauri/target/
+target/
+
+# Env / secrets
+.env
+.env.*
+.secrets/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Handoff (per workspace convention — gitignored)
+HANDOFF.md
