@@ -8,9 +8,11 @@ with a Rift-inspired dark UI. A from-scratch port of the .NET EXFIL v1.
 - **Gamma / brightness / contrast** — driver-level GDI gamma ramps (`Set/GetDeviceGammaRamp`).
   Applied to **every gamma-capable monitor** (`\\.\DISPLAY1..N`, probed directly).
 - **Digital vibrance** — NVAPI (`SetDVCLevelEx`, 0..=63 ex-scale) via raw `nvapi64.dll` `QueryInterface`.
-  Primary GPU output only (v1 parity).
-- **Six preset slots** — Normal (read-only neutral baseline), Day, Night, Custom, Preset4, Preset5.
+  Applied to **every connected NVIDIA output** — so a second monitor can't keep a stale value.
+- **Four preset slots** — Normal (native baseline), Preset 1, Preset 2, Preset 3.
   Persisted to `%APPDATA%\exfil-v2\presets.json`. Last-active preset re-applied on boot.
+  **Normal** restores each monitor's NATIVE color — neutral gamma + per-monitor default vibrance —
+  so the display picks up exactly what Windows/the driver programmed it to.
 
 No DLL injection — every write goes through the Windows display driver / NVAPI, so it's
 BattlEye / EAC-safe. No telemetry.

@@ -1,5 +1,5 @@
 //! Preset persistence — JSON at %APPDATA%\exfil-v2\presets.json.
-//! 6 slots: Normal (baseline, read-only), Day, Night, Custom, Preset4, Preset5.
+//! 4 slots: Normal (native baseline, read-only), Preset 1, Preset 2, Preset 3.
 
 use crate::gamma::ColorDials;
 use serde::{Deserialize, Serialize};
@@ -30,11 +30,9 @@ impl Default for PresetStore {
         PresetStore {
             presets: vec![
                 mk("Normal", "Normal", 1.0, 0.0, 1.0, 0),
-                mk("Day", "Day", 1.15, 0.05, 1.10, 28),
-                mk("Night", "Night", 0.90, -0.05, 1.05, 16),
-                mk("Custom", "Custom", 1.0, 0.0, 1.0, 20),
-                mk("Preset4", "Preset 4", 1.0, 0.0, 1.0, 0),
-                mk("Preset5", "Preset 5", 1.0, 0.0, 1.0, 0),
+                mk("Preset1", "Preset 1", 1.15, 0.05, 1.10, 28),
+                mk("Preset2", "Preset 2", 0.90, -0.05, 1.05, 16),
+                mk("Preset3", "Preset 3", 1.0, 0.0, 1.0, 20),
             ],
             active: "Normal".into(),
         }

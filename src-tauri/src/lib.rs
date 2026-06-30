@@ -52,7 +52,10 @@ fn apply_color(
     Ok(())
 }
 
-/// Select a preset slot: apply it + mark active. Normal resets to neutral.
+/// Select a preset slot: apply it + mark active.
+/// "Normal" restores each monitor's NATIVE color — neutral gamma + per-monitor
+/// default vibrance — so the display picks up exactly what Windows/the driver
+/// programmed it to. All other slots stamp their stored dials + vibrance.
 #[tauri::command]
 fn select_preset(state: State<AppState>, slot: String) -> Result<Preset, String> {
     let preset = {
@@ -61,9 +64,16 @@ fn select_preset(state: State<AppState>, slot: String) -> Result<Preset, String>
         s.active = slot.clone();
         p
     };
-    gamma::apply_dials(preset.dials)?;
-    if let Some(nv) = state.nvapi.as_ref() {
-        nv.set_vibrance(preset.vibrance)?;
+    if slot == "Normal" {
+        gamma::reset()?;
+        if let Some(nv) = state.nvapi.as_ref() {
+            nv.reset_vibrance_to_default()?;
+        }
+    } else {
+        gamma::apply_dials(preset.dials)?;
+        if let Some(nv) = state.nvapi.as_ref() {
+            nv.set_vibrance(preset.vibrance)?;
+        }
     }
     let _ = state.store.lock().unwrap().save();
     Ok(preset)
@@ -85,14 +95,12 @@ fn save_preset(
     s.save()
 }
 
-/// Reset display to neutral gamma + default vibrance (panic button).
+/// Reset display to neutral gamma + every monitor's native default vibrance (panic button).
 #[tauri::command]
 fn reset_display(state: State<AppState>) -> Result<(), String> {
     gamma::reset()?;
     if let Some(nv) = state.nvapi.as_ref() {
-        if let Ok(info) = nv.get_vibrance() {
-            let _ = nv.set_vibrance(info.default);
-        }
+        let _ = nv.reset_vibrance_to_default();
     }
     Ok(())
 }
@@ -132,9 +140,16 @@ pub fn run() {
                 s.get(&s.active).cloned()
             };
             if let Some(p) = active {
-                let _ = gamma::apply_dials(p.dials);
-                if let Some(nv) = state.nvapi.as_ref() {
-                    let _ = nv.set_vibrance(p.vibrance);
+                if state.store.lock().unwrap().active == "Normal" {
+                    let _ = gamma::reset();
+                    if let Some(nv) = state.nvapi.as_ref() {
+                        let _ = nv.reset_vibrance_to_default();
+                    }
+                } else {
+                    let _ = gamma::apply_dials(p.dials);
+                    if let Some(nv) = state.nvapi.as_ref() {
+                        let _ = nv.set_vibrance(p.vibrance);
+                    }
                 }
             }
             // Re-assert the active ramp on an interval so fullscreen-exclusive

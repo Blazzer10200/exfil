@@ -51,11 +51,9 @@ export const resetDisplay = () => invoke<void>("reset_display");
 export const slotAccent = (slot: string): string => {
   const map: Record<string, string> = {
     Normal: "var(--slot-normal)",
-    Day: "var(--slot-day)",
-    Night: "var(--slot-night)",
-    Custom: "var(--slot-custom)",
-    Preset4: "var(--slot-p4)",
-    Preset5: "var(--slot-p5)",
+    Preset1: "var(--slot-p1)",
+    Preset2: "var(--slot-p2)",
+    Preset3: "var(--slot-p3)",
   };
   return map[slot] ?? "var(--accent)";
 };

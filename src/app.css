@@ -48,13 +48,11 @@
   /* cyan = ambient telemetry (EXFIL rule) */
   --telemetry:     oklch(0.80 0.12 215);
 
-  /* per-preset accents — slate / amber / indigo / coral (EXFIL slots) */
+  /* per-preset accents — neutral / amber / indigo / coral (EXFIL slots) */
   --slot-normal:   oklch(0.70 0.013 258);   /* neutral grey for baseline */
-  --slot-day:      oklch(0.80 0.15 75);      /* amber */
-  --slot-night:    oklch(0.62 0.16 270);     /* indigo */
-  --slot-custom:   oklch(0.72 0.17 25);      /* coral */
-  --slot-p4:       oklch(0.72 0.12 165);     /* teal */
-  --slot-p5:       oklch(0.74 0.14 320);     /* magenta */
+  --slot-p1:       oklch(0.80 0.15 75);      /* amber */
+  --slot-p2:       oklch(0.62 0.16 270);     /* indigo */
+  --slot-p3:       oklch(0.72 0.17 25);      /* coral */
 
   /* status semantics */
   --ok:            oklch(0.73 0.18 150);

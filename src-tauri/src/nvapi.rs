@@ -95,20 +95,28 @@ impl Nvapi {
 
     /// Enumerate the first NVIDIA display handle (the primary GPU output).
     fn primary_display(&self) -> Option<NvDisplayHandle> {
-        let enum_fn: FnEnumDisplay = self.resolve(0x9ABD_D40D)?;
-        let mut handle: NvDisplayHandle = std::ptr::null_mut();
-        for i in 0..NVAPI_MAX_DISPLAYS {
-            let st = unsafe { enum_fn(i, &mut handle) };
-            if st == NVAPI_OK && !handle.is_null() {
-                return Some(handle);
-            }
-        }
-        None
+        self.all_displays().into_iter().next()
     }
 
-    /// Read current vibrance (0..=63 on the Ex scale).
-    pub fn get_vibrance(&self) -> Result<VibranceInfo, String> {
-        let display = self.primary_display().ok_or("no NVIDIA display handle")?;
+    /// Enumerate every NVIDIA display handle (one per connected output).
+    fn all_displays(&self) -> Vec<NvDisplayHandle> {
+        let mut handles = Vec::new();
+        let enum_fn: FnEnumDisplay = match self.resolve(0x9ABD_D40D) {
+            Some(f) => f,
+            None => return handles,
+        };
+        for i in 0..NVAPI_MAX_DISPLAYS {
+            let mut handle: NvDisplayHandle = std::ptr::null_mut();
+            let st = unsafe { enum_fn(i, &mut handle) };
+            if st == NVAPI_OK && !handle.is_null() {
+                handles.push(handle);
+            }
+        }
+        handles
+    }
+
+    /// Read vibrance for a specific display handle.
+    fn get_vibrance_for(&self, display: NvDisplayHandle) -> Result<VibranceInfo, String> {
         let get_fn: FnGetDvcEx = self.resolve(0x0E45_002D).ok_or("GetDVCInfoEx unavailable")?;
         let mut info = NvDisplayDvcInfoEx {
             version: make_version::<NvDisplayDvcInfoEx>(1),
@@ -129,11 +137,10 @@ impl Nvapi {
         })
     }
 
-    /// Set vibrance level (clamped to the device's reported min/max).
-    pub fn set_vibrance(&self, level: i32) -> Result<(), String> {
-        let display = self.primary_display().ok_or("no NVIDIA display handle")?;
+    /// Set vibrance for a specific display handle (clamped to its min/max).
+    fn set_vibrance_for(&self, display: NvDisplayHandle, level: i32) -> Result<(), String> {
         let set_fn: FnSetDvcEx = self.resolve(0x4A82_C2B1).ok_or("SetDVCLevelEx unavailable")?;
-        let cur = self.get_vibrance()?;
+        let cur = self.get_vibrance_for(display)?;
         let clamped = level.clamp(cur.min, cur.max);
         let mut info = NvDisplayDvcInfoEx {
             version: make_version::<NvDisplayDvcInfoEx>(1),
@@ -147,5 +154,58 @@ impl Nvapi {
             return Err(format!("SetDVCLevelEx failed: {st}"));
         }
         Ok(())
+    }
+
+    /// Read current vibrance (0..=63 on the Ex scale) for the primary output.
+    pub fn get_vibrance(&self) -> Result<VibranceInfo, String> {
+        let display = self.primary_display().ok_or("no NVIDIA display handle")?;
+        self.get_vibrance_for(display)
+    }
+
+    /// Set the same vibrance level on EVERY connected NVIDIA output.
+    /// This is the correct path for presets — otherwise monitor 2 keeps a stale value
+    /// and shows a visibly different color from monitor 1.
+    pub fn set_vibrance(&self, level: i32) -> Result<(), String> {
+        let displays = self.all_displays();
+        if displays.is_empty() {
+            return Err("no NVIDIA display handle".into());
+        }
+        let mut last_err = None;
+        for d in displays {
+            if let Err(e) = self.set_vibrance_for(d, level) {
+                last_err = Some(e);
+            }
+        }
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// Restore every connected NVIDIA output to its OWN native default vibrance.
+    /// This is what "Normal" uses so each monitor picks up the color Windows/the
+    /// driver natively programmed for it, instead of a shared forced level.
+    pub fn reset_vibrance_to_default(&self) -> Result<(), String> {
+        let displays = self.all_displays();
+        if displays.is_empty() {
+            return Err("no NVIDIA display handle".into());
+        }
+        let mut last_err = None;
+        for d in displays {
+            let default = match self.get_vibrance_for(d) {
+                Ok(info) => info.default,
+                Err(e) => {
+                    last_err = Some(e);
+                    continue;
+                }
+            };
+            if let Err(e) = self.set_vibrance_for(d, default) {
+                last_err = Some(e);
+            }
+        }
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
