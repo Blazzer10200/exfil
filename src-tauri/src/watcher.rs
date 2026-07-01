@@ -12,10 +12,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
     TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
 };
 
 static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -53,16 +59,92 @@ fn running_exes() -> Vec<String> {
     out
 }
 
-/// Public helper for the `list_processes` IPC: distinct running exe basenames,
-/// lowercased and sorted, with common system noise filtered out.
-pub fn list_running_exes() -> Vec<String> {
-    let mut v: Vec<String> = running_exes()
-        .into_iter()
-        .filter(|e| !is_noise(e))
-        .collect();
-    v.sort();
-    v.dedup();
-    v
+/// A program the user can bind a preset to, surfaced in the picker.
+/// `exe` is the lowercased basename the watcher matches on; `title` is the
+/// friendly top-level window title shown to the user.
+#[derive(serde::Serialize)]
+pub struct WindowProc {
+    pub exe: String,
+    pub title: String,
+}
+
+/// List programs that own a visible top-level window, as (exe basename, window
+/// title) pairs. This is the preferred picker source: "has a visible window" is
+/// a self-maintaining heuristic for "real user-facing app", so it needs no
+/// hardcoded denylist, and the title disambiguates same-named exes. Read-only —
+/// `EnumWindows` + `QueryFullProcessImageNameW` (PROCESS_QUERY_LIMITED_INFORMATION),
+/// no injection, no hooks. One entry per distinct exe (first window title wins).
+pub fn list_window_programs() -> Vec<WindowProc> {
+    let mut raw: Vec<(u32, String)> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_window_cb),
+            LPARAM(&mut raw as *mut Vec<(u32, String)> as isize),
+        );
+    }
+
+    // pid -> title, then resolve each pid to its exe basename, dedup by exe.
+    let mut seen_exe = std::collections::HashSet::new();
+    let mut out: Vec<WindowProc> = Vec::new();
+    for (pid, title) in raw {
+        let exe = match exe_for_pid(pid) {
+            Some(e) if !is_noise(&e) => e,
+            _ => continue,
+        };
+        if seen_exe.insert(exe.clone()) {
+            out.push(WindowProc { exe, title });
+        }
+    }
+    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out
+}
+
+/// EnumWindows callback: collect (pid, title) for visible, titled top-level windows.
+extern "system" fn enum_window_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+        let len = GetWindowTextLengthW(hwnd);
+        if len <= 0 {
+            return BOOL(1);
+        }
+        let mut buf = vec![0u16; len as usize + 1];
+        let got = GetWindowTextW(hwnd, &mut buf);
+        if got <= 0 {
+            return BOOL(1);
+        }
+        let title = String::from_utf16_lossy(&buf[..got as usize]);
+        if title.trim().is_empty() {
+            return BOOL(1);
+        }
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid != 0 {
+            let out = &mut *(lparam.0 as *mut Vec<(u32, String)>);
+            out.push((pid, title));
+        }
+    }
+    BOOL(1)
+}
+
+/// Resolve a pid to its lowercased exe basename via the full image path.
+fn exe_for_pid(pid: u32) -> Option<String> {
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = vec![0u16; 260];
+        let mut size = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(
+            handle,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        );
+        let _: windows::core::Result<()> = CloseHandle(handle);
+        ok.ok()?;
+        let path = String::from_utf16_lossy(&buf[..size as usize]);
+        path.rsplit(['\\', '/']).next().map(|s| s.to_lowercase())
+    }
 }
 
 /// Filter obvious OS/background clutter from the user-facing process picker.

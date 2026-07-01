@@ -7,15 +7,15 @@
 
 <div class="titlebar drag">
   <div class="brand">
-    <span class="mark">E</span>
+    <img class="mark" src="/favicon.png" alt="EXFIL" />
     <span class="name">EXFIL</span>
     <span class="ver mono">v2</span>
   </div>
   <div class="controls no-drag">
-    <button class="winbtn" title="Minimize" onclick={() => appWindow.minimize()}>
+    <button class="winbtn" title="Minimize" aria-label="Minimize" onclick={() => appWindow.minimize()}>
       <Minus size={15} />
     </button>
-    <button class="winbtn close" title="Close to tray" onclick={() => appWindow.hide()}>
+    <button class="winbtn close" title="Close to tray" aria-label="Close to tray" onclick={() => appWindow.hide()}>
       <X size={15} />
     </button>
   </div>
@@ -35,16 +35,10 @@
   }
   .brand { display: flex; align-items: center; gap: 8px; }
   .mark {
-    display: inline-grid;
-    place-items: center;
     width: 18px;
     height: 18px;
     border-radius: var(--radius-xs);
-    background: var(--accent);
-    color: var(--accent-fg);
-    font-weight: 800;
-    font-size: 12px;
-    line-height: 1;
+    object-fit: contain;
   }
   .name {
     font-size: var(--fs-sm);

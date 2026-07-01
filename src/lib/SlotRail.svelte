@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { Preset } from "./api";
-  import { slotAccent, listProcesses } from "./api";
-  import { Pencil, Trash2, Lock, Link2, Unlink } from "lucide-svelte";
+  import type { Preset, WindowProc } from "./api";
+  import { slotAccent, listWindowPrograms } from "./api";
+  import { Pencil, Trash2, Lock, Link2, Unlink, Upload, Download, RotateCw, Gamepad2 } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
   interface Props {
@@ -12,9 +12,24 @@
     ondelete: (slot: string) => void;
     onrename: (slot: string, name: string) => void;
     onbind: (slot: string, exe: string | null) => void;
+    oncreategame: (exe: string, title: string) => void;
+    onimport: () => void;
+    onexport: () => void;
+    onerror?: (message: string) => void;
   }
-  let { presets, active, onselect, oncreate, ondelete, onrename, onbind }: Props =
-    $props();
+  let {
+    presets,
+    active,
+    onselect,
+    oncreate,
+    ondelete,
+    onrename,
+    onbind,
+    oncreategame,
+    onimport,
+    onexport,
+    onerror,
+  }: Props = $props();
 
   // Accent index = position among non-Normal presets (Normal is fixed grey).
   function accentIndex(slot: string): number {
@@ -57,7 +72,7 @@
   // ── Right-click context menu ──
   // Menu width/height are fixed enough to clamp against the viewport so it
   // never spills off-screen near the window edges.
-  const MENU_W = 168;
+  const MENU_W = 180;
   const MENU_H = 132;
   let menu = $state<{ slot: string; x: number; y: number } | null>(null);
 
@@ -83,13 +98,22 @@
   // "Bind to program" opens a chooser: browse for an .exe via the OS file
   // dialog, OR pick from the live running-process list. Binding stores the exe
   // basename; the backend watcher auto-applies this preset when it runs.
-  let binder = $state<{ slot: string } | null>(null);
-  let procs = $state<string[]>([]);
+  // Binder modal serves two intents:
+  //  - "bind":   attach a program to an existing slot (right-click → Bind)
+  //  - "create": make a NEW preset straight from a running game (rail button)
+  let binder = $state<
+    { mode: "bind"; slot: string } | { mode: "create" } | null
+  >(null);
+  let procs = $state<WindowProc[]>([]);
   let procFilter = $state("");
+  let procLoading = $state(false);
 
   let filteredProcs = $derived(
     procFilter.trim()
-      ? procs.filter((p) => p.includes(procFilter.trim().toLowerCase()))
+      ? procs.filter((p) => {
+          const q = procFilter.trim().toLowerCase();
+          return p.title.toLowerCase().includes(q) || p.exe.includes(q);
+        })
       : procs,
   );
 
@@ -97,25 +121,41 @@
     return presets.find((p) => p.slot === slot)?.exe ?? null;
   }
 
+  async function loadProcs() {
+    procLoading = true;
+    try {
+      procs = await listWindowPrograms();
+    } catch (e) {
+      procs = [];
+      onerror?.(`Failed to list running programs: ${String(e)}`);
+    } finally {
+      procLoading = false;
+    }
+  }
+
+  async function openBinderFor(b: { mode: "bind"; slot: string } | { mode: "create" }) {
+    binder = b;
+    procFilter = "";
+    procs = [];
+    await loadProcs();
+  }
+
   async function openBinder() {
     if (!menu) return;
     const slot = menu.slot;
     closeMenu();
-    binder = { slot };
-    procFilter = "";
-    procs = [];
-    try {
-      procs = await listProcesses();
-    } catch {
-      procs = [];
-    }
+    await openBinderFor({ mode: "bind", slot });
+  }
+
+  async function openCreateFromGame() {
+    await openBinderFor({ mode: "create" });
   }
   function closeBinder() {
     binder = null;
   }
   async function browseExe() {
     if (!binder) return;
-    const slot = binder.slot;
+    const b = binder;
     const picked = await openDialog({
       multiple: false,
       directory: false,
@@ -124,19 +164,35 @@
     if (typeof picked === "string") {
       const base = picked.split(/[\\/]/).pop()?.toLowerCase() ?? "";
       if (base) {
-        onbind(slot, base);
+        if (b.mode === "create") {
+          // No window title from a file pick — derive a name from the basename.
+          const title = base.replace(/\.exe$/i, "");
+          oncreategame(base, title);
+        } else {
+          onbind(b.slot, base);
+        }
         closeBinder();
       }
     }
   }
-  function pickProc(exe: string) {
+  function pickProc(proc: WindowProc) {
     if (!binder) return;
-    onbind(binder.slot, exe);
+    if (binder.mode === "create") {
+      oncreategame(proc.exe, proc.title);
+    } else {
+      onbind(binder.slot, proc.exe);
+    }
     closeBinder();
   }
   function menuUnbind() {
     if (menu) onbind(menu.slot, null);
     closeMenu();
+  }
+
+  // Moves focus into a just-opened menu/dialog so Escape/keyboard nav work
+  // without requiring a prior click inside it.
+  function focusOnMount(node: HTMLElement) {
+    node.focus();
   }
 </script>
 
@@ -186,9 +242,25 @@
     {/each}
   </div>
 
-  <button class="new no-drag" onclick={oncreate} title="Create a new preset">
+  <button class="new no-drag" onclick={oncreate} title="Create a new blank preset">
     <span class="plus">+</span> New preset
   </button>
+  <button
+    class="new from-game no-drag"
+    onclick={openCreateFromGame}
+    title="Create a preset from a running game and auto-bind it"
+  >
+    <Gamepad2 size={14} /> From game
+  </button>
+
+  <div class="io-row no-drag">
+    <button class="io" onclick={onimport} title="Import presets from a file">
+      <Download size={13} /> Import
+    </button>
+    <button class="io" onclick={onexport} title="Export your presets to a file">
+      <Upload size={13} /> Export
+    </button>
+  </div>
 </nav>
 
 {#if menu}
@@ -202,7 +274,14 @@
       closeMenu();
     }}
   ></button>
-  <div class="ctxmenu" style="left: {menu.x}px; top: {menu.y}px;" role="menu">
+  <div
+    class="ctxmenu"
+    style="left: {menu.x}px; top: {menu.y}px;"
+    role="menu"
+    aria-label="Preset actions"
+    tabindex="-1"
+    use:focusOnMount
+  >
     {#if menu.slot === "Normal"}
       <div class="ctx-item locked" role="menuitem" aria-disabled="true">
         <Lock size={14} />
@@ -237,28 +316,57 @@
     aria-label="Close binder"
     onclick={closeBinder}
   ></button>
-  <div class="binder" role="dialog" aria-label="Bind program to preset">
+  <div class="binder" role="dialog" aria-modal="true" aria-label="Bind program to preset" tabindex="-1" use:focusOnMount>
+    <div class="binder-glow"></div>
     <header class="binder-head">
-      <span>Bind a program</span>
-      <span class="binder-sub">
-        Auto-applies this preset while the program runs.
-      </span>
+      <div class="binder-icon"><Gamepad2 size={18} /></div>
+      <div class="binder-head-text">
+        {#if binder.mode === "create"}
+          <span>Create preset from a game</span>
+          <span class="binder-sub">
+            Pick a running game — a new preset is made and auto-bound to it.
+          </span>
+        {:else}
+          <span>Bind a program</span>
+          <span class="binder-sub">
+            Auto-applies this preset while the program runs.
+          </span>
+        {/if}
+      </div>
     </header>
     <button class="browse" onclick={browseExe}>
       <Link2 size={14} />
       Browse for .exe…
     </button>
-    <div class="binder-or">or pick a running program</div>
-    <input
-      class="proc-filter"
-      placeholder="Filter…"
-      bind:value={procFilter}
-    />
+    <div class="binder-or"><span></span>or pick a running program<span></span></div>
+    <div class="proc-filter-row">
+      <input
+        class="proc-filter"
+        placeholder="Filter…"
+        bind:value={procFilter}
+      />
+      <button
+        class="proc-refresh"
+        title="Refresh list"
+        aria-label="Refresh list"
+        onclick={loadProcs}
+      >
+        <RotateCw size={14} class={procLoading ? "spin" : ""} />
+      </button>
+    </div>
     <div class="proc-list">
-      {#each filteredProcs as exe (exe)}
-        <button class="proc" onclick={() => pickProc(exe)}>{exe}</button>
+      {#each filteredProcs as proc (proc.exe)}
+        <button class="proc" onclick={() => pickProc(proc)}>
+          <span class="proc-dot"></span>
+          <span class="proc-text">
+            <span class="proc-title">{proc.title}</span>
+            <span class="proc-exe">{proc.exe}</span>
+          </span>
+        </button>
       {:else}
-        <div class="proc-empty">No matching processes</div>
+        <div class="proc-empty">
+          {procLoading ? "Loading…" : "No matching programs"}
+        </div>
       {/each}
     </div>
   </div>
@@ -372,6 +480,40 @@
   }
   .plus { font-size: 15px; line-height: 1; }
 
+  .from-game {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--accent, var(--slot-a)) 45%, transparent);
+    color: color-mix(in oklab, var(--accent, var(--slot-a)) 90%, var(--fg));
+  }
+  .from-game:hover {
+    background: color-mix(in oklab, var(--accent, var(--slot-a)) 14%, transparent);
+    border-color: color-mix(in oklab, var(--accent, var(--slot-a)) 70%, transparent);
+    color: var(--fg);
+  }
+
+  .io-row { display: flex; gap: 6px; margin-top: 6px; flex-shrink: 0; }
+  .io {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-subtle);
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .io:hover {
+    background: var(--surface-hover);
+    color: var(--fg);
+    border-color: var(--fg-faint);
+  }
+
   /* ── Context menu ── */
   .menu-backdrop {
     position: fixed;
@@ -385,20 +527,20 @@
   .ctxmenu {
     position: fixed;
     z-index: 50;
-    width: 168px;
-    padding: 4px;
+    width: 180px;
+    padding: 5px;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    background: var(--bg-elev-2);
+    background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    animation: ctx-in 90ms ease;
+    box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 5%, transparent);
+    animation: ctx-in 110ms var(--ease-soft);
     transform-origin: top left;
   }
   @keyframes ctx-in {
-    from { opacity: 0; transform: scale(0.96) translateY(-2px); }
+    from { opacity: 0; transform: scale(0.95) translateY(-3px); }
     to { opacity: 1; transform: scale(1) translateY(0); }
   }
   .ctx-item {
@@ -415,12 +557,15 @@
     font-size: var(--fs-sm);
     text-align: left;
     cursor: pointer;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 110ms ease, color 110ms ease, transform 80ms ease;
   }
+  .ctx-item :global(svg) { flex-shrink: 0; opacity: 0.8; transition: opacity 110ms ease; }
   .ctx-item:hover {
     background: var(--surface-hover);
     color: var(--fg);
   }
+  .ctx-item:hover :global(svg) { opacity: 1; }
+  .ctx-item:active { transform: scale(0.98); }
   .ctx-item.danger:hover {
     background: var(--danger-soft);
     color: var(--danger);
@@ -452,52 +597,112 @@
   }
 
   /* ── Binder modal ── */
-  .menu-backdrop.modal { z-index: 60; background: color-mix(in oklab, #000 38%, transparent); }
+  .menu-backdrop.modal {
+    z-index: 60;
+    background:
+      radial-gradient(900px 500px at 50% 30%, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%),
+      color-mix(in oklab, #000 50%, transparent);
+    backdrop-filter: blur(2px);
+    animation: backdrop-in 140ms ease;
+  }
+  @keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
   .binder {
     position: fixed;
     z-index: 70;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 320px;
+    width: 340px;
     max-height: 70vh;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 16px;
-    background: var(--bg-elev-2);
+    gap: 12px;
+    padding: 18px;
+    overflow: hidden;
+    background:
+      radial-gradient(180px 120px at 16% -10%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%),
+      linear-gradient(180deg, var(--bg-elev-3) 0%, var(--bg-elev-2) 100%);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg, 12px);
-    box-shadow: var(--shadow);
+    border-radius: var(--radius-xl, 14px);
+    box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
+    animation: binder-in 180ms var(--ease-soft);
   }
-  .binder-head { display: flex; flex-direction: column; gap: 2px; }
-  .binder-head > span:first-child { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
-  .binder-sub { font-size: var(--fs-xs); color: var(--fg-muted); }
+  @keyframes binder-in {
+    from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  .binder-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    box-shadow: inset 0 0 60px color-mix(in oklab, var(--accent) 5%, transparent);
+  }
+  .binder-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .binder-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius);
+    background: linear-gradient(155deg, color-mix(in oklab, var(--accent) 22%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+    color: var(--accent);
+    box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 25%, transparent);
+  }
+  .binder-head-text { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+  .binder-head-text > span:first-child { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
+  .binder-sub { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.4; }
   .browse {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 7px;
-    padding: 9px;
+    padding: 10px;
     border-radius: var(--radius);
     border: 1px solid var(--border-strong);
-    background: var(--field);
+    background: linear-gradient(180deg, var(--surface-hover), var(--field));
     color: var(--fg-2);
     font: inherit;
     font-size: var(--fs-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 100ms ease, color 100ms ease, border-color 100ms ease, box-shadow 120ms ease, transform 80ms ease;
   }
-  .browse:hover { background: var(--surface-hover); color: var(--fg); }
+  .browse:hover {
+    background: linear-gradient(180deg, var(--surface-active), var(--surface-hover));
+    color: var(--fg);
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border-strong));
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
+  }
+  .browse:active { transform: translateY(1px); }
   .binder-or {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     text-align: center;
     font-size: var(--fs-xs);
     color: var(--fg-subtle);
   }
+  .binder-or > span {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+  }
+  .proc-filter-row {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+  }
   .proc-filter {
-    width: 100%;
-    padding: 7px 9px;
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border-strong);
     background: var(--field);
@@ -505,34 +710,88 @@
     font: inherit;
     font-size: var(--fs-sm);
     outline: none;
+    transition: border-color 100ms ease, box-shadow 100ms ease;
   }
-  .proc-filter:focus { border-color: var(--border-focus); }
+  .proc-filter:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px var(--ring); }
+  .proc-refresh {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 33px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--field);
+    color: var(--fg-2);
+    cursor: pointer;
+    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+  }
+  .proc-refresh:hover { background: var(--surface-hover); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--border-strong)); }
+  .proc-refresh :global(.spin) { animation: proc-spin 700ms linear infinite; }
+  @keyframes proc-spin { to { transform: rotate(360deg); } }
   .proc-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     overflow-y: auto;
     min-height: 0;
     flex: 1;
   }
   .proc {
+    display: flex;
+    align-items: center;
+    gap: 9px;
     padding: 7px 9px;
     border-radius: var(--radius-sm);
-    border: none;
+    border: 1px solid transparent;
     background: transparent;
     color: var(--fg-2);
     font: inherit;
-    font-size: var(--fs-sm);
     text-align: left;
     cursor: pointer;
+    overflow: hidden;
+    transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+  }
+  .proc:hover {
+    background: var(--surface-hover);
+    border-color: var(--border);
+    color: var(--fg);
+    transform: translateX(1px);
+  }
+  .proc-dot {
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fg-faint);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--fg-faint) 12%, transparent);
+    transition: background 120ms ease, box-shadow 120ms ease;
+  }
+  .proc:hover .proc-dot {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  }
+  .proc-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+  .proc-title {
+    font-size: var(--fs-sm);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: background 100ms ease;
   }
-  .proc:hover { background: var(--surface-hover); color: var(--fg); }
+  .proc-exe {
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .proc-empty {
-    padding: 12px;
+    padding: 14px;
     text-align: center;
     font-size: var(--fs-xs);
     color: var(--fg-subtle);

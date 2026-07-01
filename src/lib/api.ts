@@ -60,11 +60,24 @@ export const renamePreset = (slot: string, name: string) =>
   invoke<void>("rename_preset", { slot, name });
 
 // Program binding. setBinding returns the fresh store (binding badges re-sync);
-// pass exe = null to clear. listProcesses → running exe basenames for the picker.
+// pass exe = null to clear. listWindowPrograms → visible-window programs for the picker.
 export const setBinding = (slot: string, exe: string | null) =>
   invoke<PresetStore>("set_binding", { slot, exe });
 
-export const listProcesses = () => invoke<string[]>("list_processes");
+// Programs with a visible window, as {exe, title} — the binder's picker source.
+// `exe` is the basename the watcher binds on; `title` is shown to the user.
+export type WindowProc = { exe: string; title: string };
+export const listWindowPrograms = () =>
+  invoke<WindowProc[]>("list_window_programs");
+
+// Import/export. The frontend picks the path via the dialog plugin; the backend
+// does the file I/O. export writes user presets (not Normal) to `path`; import
+// appends presets from `path` and returns the fresh store.
+export const exportPresets = (path: string) =>
+  invoke<void>("export_presets", { path });
+
+export const importPresets = (path: string) =>
+  invoke<PresetStore>("import_presets", { path });
 
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).

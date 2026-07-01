@@ -35,7 +35,7 @@ fn normal_preset() -> Preset {
     Preset {
         slot: "Normal".into(),
         name: "Normal".into(),
-        dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
+        dials: ColorDials::default(),
         vibrance: 0,
         exe: None,
     }
@@ -102,7 +102,7 @@ impl PresetStore {
         let preset = Preset {
             slot,
             name,
-            dials: ColorDials { gamma: 1.0, brightness: 0.0, contrast: 1.0 },
+            dials: ColorDials::default(),
             vibrance: 0,
             exe: None,
         };
@@ -178,5 +178,37 @@ impl PresetStore {
             .iter()
             .filter_map(|p| p.exe.clone().map(|e| (e, p.slot.clone())))
             .collect()
+    }
+
+    /// Serialize the user presets (everything except the fixed Normal baseline)
+    /// to a pretty JSON array for export/sharing. Slot keys + bindings are dropped
+    /// since they're machine-local — only name/dials/vibrance carry over.
+    pub fn export_json(&self) -> Result<String, String> {
+        let exported: Vec<&Preset> = self.presets.iter().filter(|p| p.slot != "Normal").collect();
+        serde_json::to_string_pretty(&exported).map_err(|e| e.to_string())
+    }
+
+    /// Import presets from an exported JSON array, appending each as a NEW user
+    /// preset with a fresh `p{next_id}` slot (additive — never overwrites existing
+    /// presets, never collides on keys). Imported bindings are cleared. Returns the
+    /// number of presets added.
+    pub fn import_json(&mut self, json: &str) -> Result<usize, String> {
+        let incoming: Vec<Preset> =
+            serde_json::from_str(json).map_err(|e| format!("invalid preset file: {e}"))?;
+        let mut added = 0;
+        for p in incoming {
+            if p.slot == "Normal" {
+                continue;
+            }
+            // add() mints a fresh slot key and pushes a neutral preset; stamp the
+            // imported color onto it via last_mut() so keys never collide.
+            self.add(p.name);
+            if let Some(slot) = self.presets.last_mut() {
+                slot.dials = p.dials;
+                slot.vibrance = p.vibrance;
+            }
+            added += 1;
+        }
+        Ok(added)
     }
 }

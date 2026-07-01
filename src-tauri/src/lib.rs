@@ -27,6 +27,14 @@ struct AppState {
     manual_active: Mutex<String>,
 }
 
+/// Lock a mutex, recovering the guard on poison instead of panicking. With
+/// `panic = "abort"` in release, a bare `.lock().unwrap()` would abort the
+/// whole process if any prior panic ever poisoned the lock; the store/string
+/// data itself is still valid after a poison, so recovering is safe here.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[derive(serde::Serialize)]
 struct SystemStatus {
     nvidia: bool,
@@ -44,7 +52,7 @@ fn get_status(state: State<AppState>) -> SystemStatus {
 
 #[tauri::command]
 fn get_presets(state: State<AppState>) -> PresetStore {
-    state.store.lock().unwrap().clone()
+    lock(&state.store).clone()
 }
 
 /// Apply gamma dials + vibrance live (used during slider drag and on slot select).
@@ -54,6 +62,12 @@ fn apply_color(
     dials: ColorDials,
     vibrance: i32,
 ) -> Result<(), String> {
+    apply_dials_and_vibrance(&state, dials, vibrance)
+}
+
+/// Push gamma dials + vibrance to the display. Shared by `apply_color` (live
+/// slider drag) and `apply_slot` (preset select) so both paths stay identical.
+fn apply_dials_and_vibrance(state: &AppState, dials: ColorDials, vibrance: i32) -> Result<(), String> {
     gamma::apply_dials(dials)?;
     if let Some(nv) = state.nvapi.as_ref() {
         nv.set_vibrance(vibrance)?;
@@ -69,7 +83,7 @@ fn apply_color(
 fn select_preset(state: State<AppState>, slot: String) -> Result<Preset, String> {
     let preset = apply_slot(&state, &slot)?;
     // A hand-pick becomes the revert target the watcher falls back to.
-    *state.manual_active.lock().unwrap() = slot;
+    *lock(&state.manual_active) = slot;
     Ok(preset)
 }
 
@@ -80,7 +94,7 @@ fn select_preset(state: State<AppState>, slot: String) -> Result<Preset, String>
 /// default vibrance); other slots stamp their stored dials + vibrance.
 fn apply_slot(state: &AppState, slot: &str) -> Result<Preset, String> {
     let preset = {
-        let mut s = state.store.lock().unwrap();
+        let mut s = lock(&state.store);
         let p = s.get(slot).cloned().ok_or("unknown slot")?;
         s.active = slot.to_string();
         p
@@ -91,12 +105,11 @@ fn apply_slot(state: &AppState, slot: &str) -> Result<Preset, String> {
             nv.reset_vibrance_to_default()?;
         }
     } else {
-        gamma::apply_dials(preset.dials)?;
-        if let Some(nv) = state.nvapi.as_ref() {
-            nv.set_vibrance(preset.vibrance)?;
-        }
+        apply_dials_and_vibrance(state, preset.dials, preset.vibrance)?;
     }
-    let _ = state.store.lock().unwrap().save();
+    if let Err(e) = lock(&state.store).save() {
+        log::warn!("failed to persist preset store after apply: {e}");
+    }
     Ok(preset)
 }
 
@@ -111,7 +124,7 @@ fn save_preset(
     if slot == "Normal" {
         return Err("Normal baseline is read-only".into());
     }
-    let mut s = state.store.lock().unwrap();
+    let mut s = lock(&state.store);
     s.update(&slot, dials, vibrance);
     s.save()
 }
@@ -119,7 +132,7 @@ fn save_preset(
 /// Create a new user preset (seeded neutral) and return it. Frontend appends + selects it.
 #[tauri::command]
 fn create_preset(state: State<AppState>, name: String) -> Result<Preset, String> {
-    let mut s = state.store.lock().unwrap();
+    let mut s = lock(&state.store);
     let p = s.add(name);
     s.save()?;
     Ok(p)
@@ -128,7 +141,7 @@ fn create_preset(state: State<AppState>, name: String) -> Result<Preset, String>
 /// Delete a user preset; returns the fresh store so the frontend re-syncs list + active.
 #[tauri::command]
 fn delete_preset(state: State<AppState>, slot: String) -> Result<PresetStore, String> {
-    let mut s = state.store.lock().unwrap();
+    let mut s = lock(&state.store);
     s.delete(&slot)?;
     s.save()?;
     Ok(s.clone())
@@ -137,7 +150,7 @@ fn delete_preset(state: State<AppState>, slot: String) -> Result<PresetStore, St
 /// Rename a user preset (display name only; Normal is read-only).
 #[tauri::command]
 fn rename_preset(state: State<AppState>, slot: String, name: String) -> Result<(), String> {
-    let mut s = state.store.lock().unwrap();
+    let mut s = lock(&state.store);
     s.rename(&slot, name)?;
     s.save()
 }
@@ -152,24 +165,49 @@ fn set_binding(
     slot: String,
     exe: Option<String>,
 ) -> Result<PresetStore, String> {
-    let mut s = state.store.lock().unwrap();
+    let mut s = lock(&state.store);
     s.set_binding(&slot, exe)?;
     s.save()?;
     Ok(s.clone())
 }
 
-/// List distinct running process exe basenames (lowercased, system noise filtered)
-/// for the "pick from running programs" binder. Read-only enumeration — no injection.
+/// List programs that own a visible window, as {exe, title} pairs, for the binder.
+/// "Has a visible window" disambiguates same-named exes via the window title and
+/// needs no hardcoded denylist. Read-only enumeration — no injection.
 #[tauri::command]
-fn list_processes() -> Vec<String> {
-    watcher::list_running_exes()
+fn list_window_programs() -> Vec<watcher::WindowProc> {
+    watcher::list_window_programs()
 }
 
-/// Reset display to neutral gamma + every monitor's native default vibrance.
+/// Export user presets (all but Normal) to a JSON file the user chose via the
+/// frontend save dialog. Shareable / a backup; slot keys + bindings are dropped.
+#[tauri::command]
+fn export_presets(state: State<AppState>, path: String) -> Result<(), String> {
+    let json = lock(&state.store).export_json()?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Import presets from a JSON file (from the frontend open dialog), appending each
+/// as a new user preset. Returns the fresh store so the frontend re-syncs the list.
+#[tauri::command]
+fn import_presets(state: State<AppState>, path: String) -> Result<PresetStore, String> {
+    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut s = lock(&state.store);
+    s.import_json(&json)?;
+    s.save()?;
+    Ok(s.clone())
+}
+
+/// Reset display to neutral gamma + every monitor's native default vibrance
+/// (shared by the tray "Reset" item and the exit-time restore).
 fn do_reset(state: &AppState) {
-    let _ = gamma::reset();
+    if let Err(e) = gamma::reset() {
+        log::warn!("gamma reset failed: {e}");
+    }
     if let Some(nv) = state.nvapi.as_ref() {
-        let _ = nv.reset_vibrance_to_default();
+        if let Err(e) = nv.reset_vibrance_to_default() {
+            log::warn!("vibrance reset failed: {e}");
+        }
     }
 }
 
@@ -191,13 +229,25 @@ pub fn run() {
         log::warn!("NVAPI unavailable — vibrance disabled, gamma still works");
     }
 
+    let store = PresetStore::load();
     let state = AppState {
         nvapi,
-        store: Mutex::new(PresetStore::load()),
-        manual_active: Mutex::new(PresetStore::load().active),
+        manual_active: Mutex::new(store.active.clone()),
+        store: Mutex::new(store),
     };
 
     tauri::Builder::default()
+        // Single-instance guard MUST be the first plugin. A second launch (e.g.
+        // autostart + a manual double-click) routes here instead of spawning a
+        // second pulse thread + watcher fighting over the same monitors — we just
+        // surface the already-running window. `--hidden` is dropped so a manual
+        // re-launch of a tray-hidden app pops it back open.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
@@ -214,7 +264,9 @@ pub fn run() {
             delete_preset,
             rename_preset,
             set_binding,
-            list_processes,
+            list_window_programs,
+            export_presets,
+            import_presets,
             reset_display,
         ])
         .setup(|app| {
@@ -227,9 +279,14 @@ pub fn run() {
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_i, &reset_i, &quit_i])?;
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("EXFIL")
+            let tray_icon = app.default_window_icon().cloned();
+            let mut tray_builder = TrayIconBuilder::new().tooltip("EXFIL");
+            if let Some(icon) = tray_icon {
+                tray_builder = tray_builder.icon(icon);
+            } else {
+                log::warn!("no default window icon set — tray icon will be blank");
+            }
+            tray_builder
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -285,16 +342,20 @@ pub fn run() {
             // Apply the last-active preset on boot so the display matches UI.
             let state = app.state::<AppState>();
             let active = {
-                let s = state.store.lock().unwrap();
+                let s = lock(&state.store);
                 s.get(&s.active).cloned()
             };
             if let Some(p) = active {
-                if state.store.lock().unwrap().active == "Normal" {
+                if lock(&state.store).active == "Normal" {
                     do_reset(&state);
                 } else {
-                    let _ = gamma::apply_dials(p.dials);
+                    if let Err(e) = gamma::apply_dials(p.dials) {
+                        log::warn!("boot-time gamma apply failed: {e}");
+                    }
                     if let Some(nv) = state.nvapi.as_ref() {
-                        let _ = nv.set_vibrance(p.vibrance);
+                        if let Err(e) = nv.set_vibrance(p.vibrance) {
+                            log::warn!("boot-time vibrance apply failed: {e}");
+                        }
                     }
                 }
             }
@@ -311,14 +372,14 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let bindings = {
                     let h = handle.clone();
-                    move || h.state::<AppState>().store.lock().unwrap().bindings()
+                    move || lock(&h.state::<AppState>().store).bindings()
                 };
                 let on_change = {
                     let h = handle.clone();
                     move |winner: Option<String>| {
                         let state = h.state::<AppState>();
                         let slot = winner
-                            .unwrap_or_else(|| state.manual_active.lock().unwrap().clone());
+                            .unwrap_or_else(|| lock(&state.manual_active).clone());
                         if let Ok(p) = apply_slot(&state, &slot) {
                             let _ = h.emit("auto-switch", &p);
                         }

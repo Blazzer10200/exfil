@@ -84,9 +84,13 @@ impl Nvapi {
         Some(me)
     }
 
+    /// Resolve a QueryInterface ordinal to a typed fn pointer. `T` must be a
+    /// bare fn-pointer type (pointer-sized) — the size check below catches an
+    /// accidental non-pointer `T` before the transmute would read garbage.
     fn resolve<T>(&self, id: u32) -> Option<T> {
+        debug_assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<*mut c_void>());
         let ptr = unsafe { (self.query)(id) };
-        if ptr.is_null() {
+        if ptr.is_null() || std::mem::size_of::<T>() != std::mem::size_of::<*mut c_void>() {
             None
         } else {
             Some(unsafe { std::mem::transmute_copy(&ptr) })

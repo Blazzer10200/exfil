@@ -17,6 +17,12 @@ with a Rift-inspired dark UI. A from-scratch port of the .NET EXFIL v1.
   driver programmed it to. (User presets get stable internal keys `p{n}` from a
   monotonic counter, so renames touch only the display name and deleted keys never
   collide.)
+- **Per-game auto-switch** — bind a preset to a program and EXFIL applies it
+  automatically while that program runs, reverting when it exits. The fastest path is
+  the **From game** button in the preset rail: it lists your running games (by window
+  title), and picking one creates a preset already bound to it — no file browsing.
+  (You can also bind from a preset's right-click menu, or browse for an `.exe`.)
+  Detection is a read-only window/process enumeration — no injection, no hooks.
 - **Lives in the tray** — runs in the background from a system-tray icon. Left-click
   the icon (or **Show EXFIL** in its menu) opens the window; the menu also has
   **Reset display** and **Quit**. Closing the window (X) **hides to tray** instead of
@@ -29,7 +35,7 @@ BattlEye / EAC-safe. No telemetry.
 
 ## Stack
 
-Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · Tailwind v4 · TypeScript
+Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · hand-authored OKLCH CSS (no framework) · TypeScript
 · Tauri 2.11 · Rust 2021 · `windows` 0.58 (GDI) · raw NVAPI FFI.
 
 ## Dev
