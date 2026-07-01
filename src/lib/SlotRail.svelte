@@ -1,33 +1,31 @@
 <script lang="ts">
   import type { Preset, WindowProc } from "./api";
   import { slotAccent, listWindowPrograms } from "./api";
-  import { Pencil, Trash2, Lock, Link2, Unlink, Upload, Download, RotateCw, Gamepad2 } from "lucide-svelte";
+  import { Pencil, Trash2, Lock, Link2, Unlink, RotateCw, Gamepad2, Plus, FilePlus2, ChevronDown } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
   interface Props {
     presets: Preset[];
     active: string;
+    dirty: boolean;
     onselect: (slot: string) => void;
     oncreate: () => void;
     ondelete: (slot: string) => void;
     onrename: (slot: string, name: string) => void;
     onbind: (slot: string, exe: string | null) => void;
     oncreategame: (exe: string, title: string) => void;
-    onimport: () => void;
-    onexport: () => void;
     onerror?: (message: string) => void;
   }
   let {
     presets,
     active,
+    dirty,
     onselect,
     oncreate,
     ondelete,
     onrename,
     onbind,
     oncreategame,
-    onimport,
-    onexport,
     onerror,
   }: Props = $props();
 
@@ -189,6 +187,25 @@
     closeMenu();
   }
 
+  // ── Add-preset popover ──
+  // Single entry point for both preset-creation flows: a blank preset, or one
+  // seeded from a running program. Replaces two separate rail buttons.
+  let addOpen = $state(false);
+  function toggleAdd() {
+    addOpen = !addOpen;
+  }
+  function closeAdd() {
+    addOpen = false;
+  }
+  function addBlank() {
+    closeAdd();
+    oncreate();
+  }
+  async function addFromProgram() {
+    closeAdd();
+    await openCreateFromGame();
+  }
+
   // Moves focus into a just-opened menu/dialog so Escape/keyboard nav work
   // without requiring a prior click inside it.
   function focusOnMount(node: HTMLElement) {
@@ -197,8 +214,8 @@
 </script>
 
 <svelte:window
-  onkeydown={(e) => e.key === "Escape" && closeMenu()}
-  onblur={closeMenu}
+  onkeydown={(e) => e.key === "Escape" && (closeMenu(), closeAdd())}
+  onblur={() => (closeMenu(), closeAdd())}
 />
 
 <nav class="rail">
@@ -217,7 +234,7 @@
           oncontextmenu={(e) => openMenu(e, p.slot)}
           title={p.slot === "Normal" ? "Native baseline" : p.name}
         >
-          <span class="dot"></span>
+          <span class="dot" class:dirty={p.slot === active && dirty}></span>
           {#if editing === p.slot}
             <!-- svelte-ignore a11y_autofocus -->
             <input
@@ -242,24 +259,23 @@
     {/each}
   </div>
 
-  <button class="new no-drag" onclick={oncreate} title="Create a new blank preset">
-    <span class="plus">+</span> New preset
-  </button>
-  <button
-    class="new from-game no-drag"
-    onclick={openCreateFromGame}
-    title="Create a preset from a running game and auto-bind it"
-  >
-    <Gamepad2 size={14} /> From game
-  </button>
-
-  <div class="io-row no-drag">
-    <button class="io" onclick={onimport} title="Import presets from a file">
-      <Download size={13} /> Import
+  <div class="add-wrap">
+    <button class="new no-drag" onclick={toggleAdd} aria-expanded={addOpen} aria-haspopup="true">
+      <Plus size={14} /> Add preset <ChevronDown size={12} class="chev" />
     </button>
-    <button class="io" onclick={onexport} title="Export your presets to a file">
-      <Upload size={13} /> Export
-    </button>
+    {#if addOpen}
+      <button class="menu-backdrop" aria-label="Close menu" onclick={closeAdd}></button>
+      <div class="add-menu" role="menu" aria-label="Add preset" tabindex="-1" use:focusOnMount>
+        <button class="ctx-item" role="menuitem" onclick={addBlank}>
+          <FilePlus2 size={14} />
+          <span>Blank preset</span>
+        </button>
+        <button class="ctx-item" role="menuitem" onclick={addFromProgram}>
+          <Gamepad2 size={14} />
+          <span>From a running program…</span>
+        </button>
+      </div>
+    {/if}
   </div>
 </nav>
 
@@ -436,6 +452,15 @@
   .slot.active .dot {
     box-shadow: 0 0 8px 1px color-mix(in oklab, var(--slot-accent) 70%, transparent);
   }
+  .dot.dirty {
+    background: var(--warn);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 25%, transparent);
+    animation: dirty-pulse 1600ms ease-in-out infinite;
+  }
+  @keyframes dirty-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 25%, transparent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in oklab, var(--warn) 12%, transparent); }
+  }
   .label {
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -456,62 +481,45 @@
     outline: none;
   }
   .rename:focus { border-color: var(--border-focus); }
+  .add-wrap { position: relative; flex-shrink: 0; }
   .new {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 8px;
+    width: 100%;
+    padding: 9px 8px;
     border-radius: var(--radius);
-    border: 1px dashed var(--border-strong);
-    background: transparent;
-    color: var(--fg-muted);
+    border: 1px solid color-mix(in oklab, var(--accent, var(--slot-a)) 40%, transparent);
+    background: color-mix(in oklab, var(--accent, var(--slot-a)) 10%, transparent);
+    color: color-mix(in oklab, var(--accent, var(--slot-a)) 92%, var(--fg));
     font: inherit;
     font-size: var(--fs-sm);
     font-weight: 500;
     cursor: pointer;
-    flex-shrink: 0;
     transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   }
   .new:hover {
-    background: var(--surface-hover);
-    color: var(--fg);
-    border-color: var(--fg-faint);
-  }
-  .plus { font-size: 15px; line-height: 1; }
-
-  .from-game {
-    border-style: solid;
-    border-color: color-mix(in oklab, var(--accent, var(--slot-a)) 45%, transparent);
-    color: color-mix(in oklab, var(--accent, var(--slot-a)) 90%, var(--fg));
-  }
-  .from-game:hover {
-    background: color-mix(in oklab, var(--accent, var(--slot-a)) 14%, transparent);
-    border-color: color-mix(in oklab, var(--accent, var(--slot-a)) 70%, transparent);
+    background: color-mix(in oklab, var(--accent, var(--slot-a)) 18%, transparent);
+    border-color: color-mix(in oklab, var(--accent, var(--slot-a)) 65%, transparent);
     color: var(--fg);
   }
-
-  .io-row { display: flex; gap: 6px; margin-top: 6px; flex-shrink: 0; }
-  .io {
-    flex: 1;
+  .new :global(.chev) { margin-left: -1px; opacity: 0.7; }
+  .add-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 50;
+    padding: 5px;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    padding: 6px;
+    flex-direction: column;
+    gap: 2px;
+    background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--fg-subtle);
-    font: inherit;
-    font-size: var(--fs-xs);
-    font-weight: 500;
-    cursor: pointer;
-  }
-  .io:hover {
-    background: var(--surface-hover);
-    color: var(--fg);
-    border-color: var(--fg-faint);
+    box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 5%, transparent);
+    animation: ctx-in 110ms var(--ease-soft);
   }
 
   /* ── Context menu ── */

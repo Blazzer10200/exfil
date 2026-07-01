@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-  import { RotateCcw, Save, Cpu, CircleAlert, Gamepad2 } from "lucide-svelte";
+  import { RotateCcw, Save, Cpu, CircleAlert, Gamepad2, CheckCircle2, XCircle } from "lucide-svelte";
   import Titlebar from "$lib/Titlebar.svelte";
   import SlotRail from "$lib/SlotRail.svelte";
   import Slider from "$lib/Slider.svelte";
@@ -260,20 +260,19 @@
 </script>
 
 <div class="app">
-  <Titlebar />
+  <Titlebar onimport={onImport} onexport={onExport} />
 
   <div class="body">
     <SlotRail
       {presets}
       {active}
+      {dirty}
       onselect={onSelect}
       oncreate={onCreate}
       oncreategame={onCreateFromGame}
       ondelete={onDelete}
       onrename={onRename}
       onbind={onBind}
-      onimport={onImport}
-      onexport={onExport}
       onerror={(msg) => flash(msg, "err")}
     />
 
@@ -311,6 +310,7 @@
             </div>
           </div>
           <div class="ramp"></div>
+          <div class="preview-legend">Live preview — reflects the sliders below, not the exact on-screen color</div>
         </div>
         <div class="grid">
           <div class="col">
@@ -380,7 +380,10 @@
         </button>
         <div class="spacer"></div>
         {#if toast}
-          <span class="toast" class:err={toast.kind === "err"}>{toast.msg}</span>
+          <span class="toast" class:err={toast.kind === "err"}>
+            {#if toast.kind === "err"}<XCircle size={13} />{:else}<CheckCircle2 size={13} />{/if}
+            {toast.msg}
+          </span>
         {/if}
         <button
           class="btn primary"
@@ -536,6 +539,9 @@
   .actions { display: flex; align-items: center; gap: 12px; margin-top: auto; }
   .spacer { flex: 1; }
   .toast {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-size: var(--fs-sm);
     color: var(--ok);
     padding: 4px 10px;
@@ -547,5 +553,11 @@
   @keyframes toast-in {
     from { opacity: 0; transform: translateY(2px) scale(0.97); }
     to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .preview-legend {
+    font-size: 10px;
+    color: var(--fg-faint);
+    letter-spacing: 0.01em;
+    text-align: center;
   }
 </style>
