@@ -48,3 +48,8 @@ npx @tauri-apps/cli build    # release exe + NSIS installer
 
 Build output: `C:\cargo-targets\release\exfil-v2.exe` and
 `...\bundle\nsis\EXFIL_2.0.0_x64-setup.exe`.
+
+## Sharing with others
+
+See [`DISTRIBUTING.md`](./DISTRIBUTING.md) for what to expect (and tell people)
+when handing the installer to a machine that isn't yours.
