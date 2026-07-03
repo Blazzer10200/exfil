@@ -206,6 +206,23 @@ where
             // exe -> slot, only for bound exes
             let bind_map: HashMap<String, String> = binds.into_iter().collect();
 
+            // Nothing bound → skip the full process snapshot entirely. Enumerating
+            // every process on the machine every tick is pure waste when there's
+            // no exe to match; for a background tray utility with no bindings (the
+            // common case) this keeps the watcher thread effectively idle. If a
+            // bound winner was active when the last binding was cleared, revert to
+            // the manual pick once. (`!announced_any` preserves the original
+            // first-tick announce that establishes the baseline on boot.)
+            if bind_map.is_empty() {
+                launch_seq.clear();
+                if last_winner.is_some() || !announced_any {
+                    announced_any = true;
+                    last_winner = None;
+                    on_change(None);
+                }
+                continue;
+            }
+
             let running: std::collections::HashSet<String> =
                 running_exes().into_iter().collect();
 
