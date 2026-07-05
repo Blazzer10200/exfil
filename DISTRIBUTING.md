@@ -7,11 +7,13 @@ expect, not a list of blockers.
 
 ## What to send
 
-`C:\cargo-targets\release\bundle\nsis\EXFIL_2.0.0_x64-setup.exe` — a
-self-contained NSIS installer. It embeds the WebView2 bootstrapper, so it'll
-silently install WebView2 on first run if the target machine doesn't already
-have it (Windows 11 ships it; most Windows 10 installs get it via Windows
-Update, but a debloated/offline machine might not).
+Point them at the **GitHub Releases page**, or hand them the
+`EXFIL_x.y.z_x64-setup.exe` from your local build output
+(`...\release\bundle\nsis\`). Either way it's the same self-contained NSIS
+installer: it embeds the WebView2 bootstrapper, so it'll silently install
+WebView2 on first run if the target machine doesn't already have it (Windows 11
+ships it; most Windows 10 installs get it via Windows Update, but a
+debloated/offline machine might not).
 
 ## What already Just Works on another PC
 

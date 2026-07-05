@@ -1,6 +1,6 @@
 {
   "name": "exfil-v2",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "EXFIL — per-game color/gamma/vibrance preset tool. Tauri + Svelte rewrite.",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

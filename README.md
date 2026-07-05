@@ -1,44 +1,64 @@
-# EXFIL v2
+<p align="center">
+  <img src="src-tauri/app-icon.png" width="90" alt="EXFIL logo" />
+</p>
 
-Per-game color / gamma / digital-vibrance preset tool. Tauri 2 (Rust) + Svelte 5,
-with a Rift-inspired dark UI. A from-scratch port of the .NET EXFIL v1.
+<h1 align="center">EXFIL</h1>
+
+<p align="center">
+  Per-game color, gamma &amp; digital-vibrance presets for Windows.<br/>
+  Driver-level only — <strong>no injection, BattlEye / EAC-safe</strong>. No telemetry.
+</p>
+
+<p align="center">
+  <img src="docs/screenshot.jpg" width="740" alt="EXFIL main window" />
+</p>
+
+## Install
+
+1. Download the latest `EXFIL_x.y.z_x64-setup.exe` from **[Releases](../../releases)** and run it.
+2. Windows will likely show a SmartScreen warning ("Windows protected your PC") because the
+   installer is unsigned — click **More info → Run anyway**.
+3. That's it. EXFIL lives in the system tray, starts with Windows (toggleable from the
+   titlebar `⋮` menu), and installs per-user (no admin needed). The installer embeds the
+   WebView2 bootstrapper, so it works on machines that don't have WebView2 yet.
+
+**Requirements:** Windows 10/11 x64. Gamma/brightness/contrast work on any GPU;
+**digital vibrance needs an NVIDIA GPU** (on AMD/Intel the slider simply disables itself).
+
+More detail on running it on a machine that isn't yours — HDR caveats, AV false positives,
+sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
 
 ## What it does
 
-- **Gamma / brightness / contrast** — driver-level GDI gamma ramps (`Set/GetDeviceGammaRamp`).
-  Applied to **every gamma-capable monitor** (`\\.\DISPLAY1..N`, probed directly).
-- **Digital vibrance** — NVAPI (`SetDVCLevelEx`, 0..=63 ex-scale) via raw `nvapi64.dll` `QueryInterface`.
-  Applied to **every connected NVIDIA output** — so a second monitor can't keep a stale value.
-- **Your own presets** — a fixed read-only **Normal** baseline plus presets you
-  **create, name, rename, and delete** yourself, each tuned live from the main color
-  controls. Persisted to `%APPDATA%\exfil-v2\presets.json`; last-active preset
-  re-applied on boot. **Normal** restores each monitor's NATIVE color — neutral gamma
-  + per-monitor default vibrance — so the display picks up exactly what Windows/the
-  driver programmed it to. (User presets get stable internal keys `p{n}` from a
-  monotonic counter, so renames touch only the display name and deleted keys never
-  collide.)
-- **Per-game auto-switch** — bind a preset to a program and EXFIL applies it
-  automatically while that program runs, reverting when it exits. The fastest path is
-  the **From game** button in the preset rail: it lists your running games (by window
-  title), and picking one creates a preset already bound to it — no file browsing.
-  (You can also bind from a preset's right-click menu, or browse for an `.exe`.)
-  Detection is a read-only window/process enumeration — no injection, no hooks.
-- **Lives in the tray** — runs in the background from a system-tray icon. Left-click
-  the icon (or **Show EXFIL** in its menu) opens the window; the menu also has
-  **Reset display** and **Quit**. Closing the window (X) **hides to tray** instead of
-  quitting — the active ramp keeps being re-asserted.
-- **Starts with Windows** — registers an autostart entry (HKCU Run key) and launches
-  **hidden to the tray** (`--hidden`) on login, so your last look is applied from boot.
+- **Gamma / brightness / contrast** — driver-level GDI gamma ramps (`Set/GetDeviceGammaRamp`),
+  applied to **every gamma-capable monitor** (`\\.\DISPLAY1..N`, probed live).
+- **Digital vibrance** — NVAPI (`SetDVCLevelEx`) via raw `nvapi64.dll` `QueryInterface`,
+  applied to **every connected NVIDIA output** so a second monitor never keeps a stale value.
+- **Your own presets** — a fixed read-only **Normal** baseline (restores each monitor's
+  native color) plus presets you create, rename, and delete, tuned live from the color
+  controls. Persisted per-user; the last-active preset re-applies on boot.
+- **Per-game auto-switch** — bind a preset to a program and EXFIL applies it automatically
+  while that program runs, reverting when it exits. Create a preset straight from a running
+  game (**Add preset → From a running program…**), or bind/unbind from the preset's
+  right-click menu or the main panel. Detection is a read-only window/process enumeration —
+  no injection, no hooks.
+- **Lives in the tray** — closing the window hides to tray; the tray menu has
+  **Show / Reset display / Quit**. The active ramp is re-asserted on an interval so
+  fullscreen games can't permanently steal the gamma.
+- **Always exits clean** — every exit path (tray Quit, OS shutdown) restores native
+  gamma + vibrance, so the screen is never left tinted with no app to clear it.
+- **Import / export** — share presets as JSON (titlebar `⋮` menu); import is additive and
+  never overwrites.
 
-No DLL injection — every write goes through the Windows display driver / NVAPI, so it's
-BattlEye / EAC-safe. No telemetry.
+## Anti-cheat safety
 
-## Stack
+EXFIL never touches game processes. Gamma goes through the Windows display driver
+(GDI), vibrance through NVIDIA's public NVAPI, and the auto-switch watcher only *reads*
+the process list (`CreateToolhelp32Snapshot` / `EnumWindows`) — no DLL injection, no
+hooks, no memory access. This is the same class of access the NVIDIA Control Panel and
+Windows itself use, which is what keeps it BattlEye / EAC-safe.
 
-Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · hand-authored OKLCH CSS (no framework) · TypeScript
-· Tauri 2.11 · Rust 2021 · `windows` 0.58 (GDI) · raw NVAPI FFI.
-
-## Dev
+## Build from source
 
 ```bash
 npm install
@@ -46,10 +66,21 @@ npx @tauri-apps/cli dev      # hot-reload dev
 npx @tauri-apps/cli build    # release exe + NSIS installer
 ```
 
-Build output: `C:\cargo-targets\release\exfil-v2.exe` and
-`...\bundle\nsis\EXFIL_2.0.0_x64-setup.exe`.
+Outputs land in `src-tauri/target/release/` (or `%CARGO_TARGET_DIR%\release\` if you set
+one): `exfil-v2.exe` and `bundle/nsis/EXFIL_x.y.z_x64-setup.exe`.
 
-## Sharing with others
+Tagged pushes (`v*`) build the installer on CI and attach it to a draft GitHub Release
+(see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
-See [`DISTRIBUTING.md`](./DISTRIBUTING.md) for what to expect (and tell people)
-when handing the installer to a machine that isn't yours.
+**Stack:** Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · hand-authored OKLCH
+CSS · TypeScript · Tauri 2 · Rust 2021 · `windows` crate (GDI) · raw NVAPI FFI.
+
+## Data
+
+Presets live at `%APPDATA%\exfil-v2\presets.json` — created fresh on first run,
+per-user, nothing else is written anywhere. No telemetry, no analytics, no crash
+reporting.
+
+## License
+
+[MIT](./LICENSE)

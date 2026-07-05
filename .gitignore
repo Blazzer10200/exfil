@@ -22,3 +22,6 @@ Thumbs.db
 
 # Handoff (per workspace convention — gitignored)
 HANDOFF.md
+
+# Claude Code local runtime state
+.claude/

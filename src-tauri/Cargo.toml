@@ -1,8 +1,9 @@
 [package]
 name = "exfil-v2"
-version = "2.0.0"
+version = "2.1.0"
 description = "EXFIL — per-game color/gamma/vibrance preset tool"
 authors = ["Blazzer"]
+license = "MIT"
 edition = "2021"
 
 [lib]
