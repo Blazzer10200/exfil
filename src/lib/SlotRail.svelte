@@ -68,16 +68,20 @@
   }
 
   // ── Right-click context menu ──
-  // Menu width/height are fixed enough to clamp against the viewport so it
-  // never spills off-screen near the window edges.
+  // Width is fixed; height varies with the slot's items (locked = 1,
+  // unbound = 3, bound = 4), so estimate per-item when clamping against the
+  // viewport so the tallest variant never spills off-screen.
   const MENU_W = 180;
-  const MENU_H = 132;
   let menu = $state<{ slot: string; x: number; y: number } | null>(null);
 
+  function menuHeight(slot: string): number {
+    const items = slot === "Normal" ? 1 : boundExe(slot) ? 4 : 3;
+    return 12 + items * 36;
+  }
   function openMenu(e: MouseEvent, slot: string) {
     e.preventDefault();
     const x = Math.min(e.clientX, window.innerWidth - MENU_W - 8);
-    const y = Math.min(e.clientY, window.innerHeight - MENU_H - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menuHeight(slot) - 8);
     menu = { slot, x: Math.max(8, x), y: Math.max(8, y) };
   }
   function closeMenu() {
@@ -256,8 +260,7 @@
         </button>
         {#if p.slot !== "Normal" && p.exe}
           <span class="bound" title="Auto-switches when {p.exe} is running">
-            <Link2 size={10} />
-            {p.exe}
+            <Link2 size={11} />
           </span>
         {/if}
       </div>
@@ -306,7 +309,7 @@
     {#if menu.slot === "Normal"}
       <div class="ctx-item locked" role="menuitem" aria-disabled="true">
         <Lock size={14} />
-        <span>Native baseline — locked</span>
+        <span>Native baseline</span>
       </div>
     {:else}
       <button class="ctx-item" role="menuitem" onclick={menuRename}>
@@ -540,6 +543,23 @@
     animation: ctx-in 110ms var(--ease-soft);
   }
 
+  /* Programmatic container focus (focusOnMount) shouldn't draw the UA ring;
+     keyboard focus on the items themselves gets the app ring token. */
+  .ctxmenu:focus,
+  .add-menu:focus,
+  .binder:focus { outline: none; }
+  .pick:focus-visible,
+  .new:focus-visible,
+  .ctx-item:focus-visible,
+  .proc:focus-visible,
+  .browse:focus-visible,
+  .proc-refresh:focus-visible,
+  .proc-filter:focus-visible,
+  .binder-close:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+
   /* ── Context menu ── */
   .menu-backdrop {
     position: fixed;
@@ -603,22 +623,19 @@
   }
   .ctx-item.locked:hover { background: transparent; color: var(--fg-faint); }
 
-  /* ── Bound-program badge ── */
+  /* ── Bound-program badge ──
+     Icon-only so it never crowds out the preset name (the exe lives in the
+     tooltip and the main panel's auto-switch block). */
   .bound {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    max-width: 64px;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
     margin-right: 8px;
-    padding: 2px 5px;
-    border-radius: var(--radius-xs);
+    border-radius: 999px;
     background: color-mix(in oklab, var(--slot-accent) 16%, transparent);
     color: color-mix(in oklab, var(--slot-accent) 90%, var(--fg));
-    font-size: 10px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     flex-shrink: 0;
   }
 

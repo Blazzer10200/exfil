@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getVersion } from "@tauri-apps/api/app";
   import { Minus, X, MoreVertical, Download, Upload, Power, Check } from "lucide-svelte";
   import { getAutostart, setAutostart } from "./api";
 
@@ -15,7 +16,14 @@
 
   // Start-with-Windows toggle — backed by the persisted store preference.
   let autostart = $state(true);
+  // Real app version for the titlebar chip; static "v2" until resolved.
+  let ver = $state("v2");
   onMount(async () => {
+    try {
+      ver = `v${await getVersion()}`;
+    } catch {
+      // cosmetic — keep the static fallback
+    }
     try {
       autostart = await getAutostart();
     } catch (e) {
@@ -56,7 +64,7 @@
   <div class="brand">
     <img class="mark" src="/favicon.png" alt="EXFIL" />
     <span class="name">EXFIL</span>
-    <span class="ver mono">v2</span>
+    <span class="ver mono">{ver}</span>
   </div>
   <div class="controls no-drag">
     <div class="menu-wrap">
@@ -193,6 +201,14 @@
     transition: background 110ms ease, color 110ms ease;
   }
   .dd-item:hover { background: var(--surface-hover); color: var(--fg); }
+  /* Programmatic container focus shouldn't draw the UA ring; keyboard focus
+     on the items themselves gets the app ring token instead. */
+  .dropdown:focus { outline: none; }
+  .winbtn:focus-visible,
+  .dd-item:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
   .dd-item span { flex: 1; }
   .dd-item :global(.on) { flex-shrink: 0; color: var(--accent); }
   .dd-sep { height: 1px; margin: 3px 6px; background: var(--border); }

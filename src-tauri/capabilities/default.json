@@ -4,6 +4,7 @@
   "description": "Capability for the main EXFIL window",
   "windows": ["main"],
   "permissions": [
+    "core:app:default",
     "core:event:default",
     "core:path:default",
     "core:webview:default",

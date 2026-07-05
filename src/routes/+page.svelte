@@ -563,6 +563,11 @@
     opacity: 0.9;
   }
   .autoswitch .link:hover { opacity: 1; text-decoration: underline; }
+  .autoswitch .link:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+    border-radius: 3px;
+  }
   .vibrance-note {
     margin-top: 2px;
     font-size: var(--fs-xs);
