@@ -23,12 +23,19 @@ fn default_next_id() -> u32 {
     1
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PresetStore {
     pub presets: Vec<Preset>,
     pub active: String,
     #[serde(default = "default_next_id")]
     pub next_id: u32,
+    /// Launch EXFIL when Windows starts (drives the HKCU Run key on boot).
+    #[serde(default = "default_true")]
+    pub autostart: bool,
 }
 
 fn normal_preset() -> Preset {
@@ -47,6 +54,7 @@ impl Default for PresetStore {
             presets: vec![normal_preset()],
             active: "Normal".into(),
             next_id: 1,
+            autostart: true,
         }
     }
 }

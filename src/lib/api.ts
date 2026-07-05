@@ -79,6 +79,12 @@ export const exportPresets = (path: string) =>
 export const importPresets = (path: string) =>
   invoke<PresetStore>("import_presets", { path });
 
+// Start-with-Windows preference (HKCU Run key + persisted flag).
+// setAutostart returns the new value.
+export const getAutostart = () => invoke<boolean>("get_autostart");
+export const setAutostart = (enabled: boolean) =>
+  invoke<boolean>("set_autostart", { enabled });
+
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).
 const ACCENT_CYCLE = [

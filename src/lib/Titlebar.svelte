@@ -1,14 +1,34 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Minus, X, MoreVertical, Download, Upload } from "lucide-svelte";
+  import { Minus, X, MoreVertical, Download, Upload, Power, Check } from "lucide-svelte";
+  import { getAutostart, setAutostart } from "./api";
 
   interface Props {
     onimport: () => void;
     onexport: () => void;
+    onerror?: (message: string) => void;
   }
-  let { onimport, onexport }: Props = $props();
+  let { onimport, onexport, onerror }: Props = $props();
 
   const appWindow = getCurrentWindow();
+
+  // Start-with-Windows toggle — backed by the persisted store preference.
+  let autostart = $state(true);
+  onMount(async () => {
+    try {
+      autostart = await getAutostart();
+    } catch (e) {
+      onerror?.(String(e));
+    }
+  });
+  async function toggleAutostart() {
+    try {
+      autostart = await setAutostart(!autostart);
+    } catch (e) {
+      onerror?.(String(e));
+    }
+  }
 
   let menuOpen = $state(false);
   function toggleMenu() {
@@ -53,6 +73,17 @@
       {#if menuOpen}
         <button class="menu-backdrop" aria-label="Close menu" onclick={closeMenu}></button>
         <div class="dropdown" role="menu" aria-label="More options" tabindex="-1" use:focusOnMount>
+          <button
+            class="dd-item"
+            role="menuitemcheckbox"
+            aria-checked={autostart}
+            onclick={toggleAutostart}
+          >
+            <Power size={14} />
+            <span>Start with Windows</span>
+            {#if autostart}<Check size={13} class="on" />{/if}
+          </button>
+          <div class="dd-sep"></div>
           <button class="dd-item" role="menuitem" onclick={doImport}>
             <Download size={14} />
             <span>Import presets…</span>
@@ -162,4 +193,7 @@
     transition: background 110ms ease, color 110ms ease;
   }
   .dd-item:hover { background: var(--surface-hover); color: var(--fg); }
+  .dd-item span { flex: 1; }
+  .dd-item :global(.on) { flex-shrink: 0; color: var(--accent); }
+  .dd-sep { height: 1px; margin: 3px 6px; background: var(--border); }
 </style>

@@ -25,6 +25,9 @@
   } from "$lib/api";
 
   let presets = $state<Preset[]>([]);
+  // Rail instance — exposes openBindFor so the main-panel "Bind…" link can
+  // open the binder for the active slot.
+  let rail = $state<{ openBindFor: (slot: string) => Promise<void> } | undefined>();
   let active = $state("Normal");
   let dials = $state<ColorDials>({ gamma: 1.0, brightness: 0.0, contrast: 1.0 });
   let vibrance = $state(0);
@@ -260,10 +263,11 @@
 </script>
 
 <div class="app">
-  <Titlebar onimport={onImport} onexport={onExport} />
+  <Titlebar onimport={onImport} onexport={onExport} onerror={(msg) => flash(msg, "err")} />
 
   <div class="body">
     <SlotRail
+      bind:this={rail}
       {presets}
       {active}
       {dirty}
@@ -285,7 +289,7 @@
               {#if readOnly}
                 Baseline reference — read-only neutral profile
               {:else}
-                Adjust color, gamma &amp; vibrance for this slot
+                Adjust color, gamma &amp; vibrance for this preset
               {/if}
             </p>
           </div>
@@ -363,16 +367,21 @@
                 Level {vibrance} / {vibranceMax} · driver-level, BattlEye-safe.
               {/if}
             </div>
+            {#if !readOnly}
+              <div class="autoswitch" class:bound={!!current?.exe}>
+                <Gamepad2 size={13} />
+                {#if current?.exe}
+                  <span>Auto-applies while <strong>{current.exe}</strong> runs</span>
+                  <button class="link" onclick={() => onBind(active, null)}>Unbind</button>
+                {:else}
+                  <span>Not bound to a game</span>
+                  <button class="link" onclick={() => rail?.openBindFor(active)}>Bind…</button>
+                {/if}
+              </div>
+            {/if}
           </div>
         </div>
       </section>
-
-      {#if current?.exe}
-        <div class="bound-strip card">
-          <Gamepad2 size={14} />
-          <span>Auto-applies while <strong>{current.exe}</strong> is running</span>
-        </div>
-      {/if}
 
       <footer class="actions">
         <button class="btn danger" onclick={onReset} disabled={busy}>
@@ -521,15 +530,39 @@
     transition: filter 60ms linear;
   }
 
-  .bound-strip {
+  .autoswitch {
+    margin-top: 16px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
+    gap: 7px;
+    padding: 9px 11px;
+    border-radius: var(--radius);
+    border: 1px dashed var(--border-strong);
+    color: var(--fg-subtle);
     font-size: var(--fs-xs);
+  }
+  .autoswitch.bound {
+    border-style: solid;
+    border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+    background: color-mix(in oklab, var(--accent) 7%, transparent);
     color: var(--fg-muted);
   }
-  .bound-strip strong { color: var(--fg-2); font-weight: 600; }
+  .autoswitch :global(svg) { flex-shrink: 0; opacity: 0.8; }
+  .autoswitch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .autoswitch strong { color: var(--fg-2); font-weight: 600; }
+  .autoswitch .link {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    opacity: 0.9;
+  }
+  .autoswitch .link:hover { opacity: 1; text-decoration: underline; }
   .vibrance-note {
     margin-top: 2px;
     font-size: var(--fs-xs);

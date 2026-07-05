@@ -198,6 +198,29 @@ fn import_presets(state: State<AppState>, path: String) -> Result<PresetStore, S
     Ok(s.clone())
 }
 
+/// Whether EXFIL starts with Windows (stored preference; default on).
+#[tauri::command]
+fn get_autostart(state: State<AppState>) -> bool {
+    lock(&state.store).autostart
+}
+
+/// Toggle start-with-Windows: flips the HKCU Run key and persists the choice
+/// so boot-time setup re-asserts it. Returns the new value.
+#[tauri::command]
+fn set_autostart(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+) -> Result<bool, String> {
+    let al = app.autolaunch();
+    let res = if enabled { al.enable() } else { al.disable() };
+    res.map_err(|e| e.to_string())?;
+    let mut s = lock(&state.store);
+    s.autostart = enabled;
+    s.save()?;
+    Ok(enabled)
+}
+
 /// Reset display to neutral gamma + every monitor's native default vibrance
 /// (shared by the tray "Reset" item and the exit-time restore).
 fn do_reset(state: &AppState) {
@@ -268,10 +291,17 @@ pub fn run() {
             export_presets,
             import_presets,
             reset_display,
+            get_autostart,
+            set_autostart,
         ])
         .setup(|app| {
-            // Run on Windows startup (hidden to tray). Idempotent — safe each boot.
-            let _ = app.autolaunch().enable();
+            // Start-with-Windows honors the stored preference (default on) —
+            // re-asserted each boot, toggled from the titlebar menu.
+            {
+                let autostart = lock(&app.state::<AppState>().store).autostart;
+                let al = app.autolaunch();
+                let _ = if autostart { al.enable() } else { al.disable() };
+            }
 
             // ── System tray: Show / Reset display / Quit ──
             let show_i = MenuItem::with_id(app, "show", "Show EXFIL", true, None::<&str>)?;

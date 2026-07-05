@@ -84,19 +84,32 @@ pub fn list_window_programs() -> Vec<WindowProc> {
     }
 
     // pid -> title, then resolve each pid to its exe basename, dedup by exe.
+    // EXFIL itself is never a valid binding target (it would apply always),
+    // and likely games sort ahead of everything else so the thing the user
+    // came here to bind is at the top of the picker.
+    let self_exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
     let mut seen_exe = std::collections::HashSet::new();
-    let mut out: Vec<WindowProc> = Vec::new();
+    let mut scored: Vec<(bool, WindowProc)> = Vec::new();
     for (pid, title) in raw {
-        let exe = match exe_for_pid(pid) {
-            Some(e) if !is_noise(&e) => e,
+        let path = match path_for_pid(pid) {
+            Some(p) => p,
+            None => continue,
+        };
+        let exe = match path.rsplit(['\\', '/']).next() {
+            Some(b) if !b.is_empty() => b.to_string(),
             _ => continue,
         };
+        if is_noise(&exe) || self_exe.as_deref() == Some(exe.as_str()) {
+            continue;
+        }
         if seen_exe.insert(exe.clone()) {
-            out.push(WindowProc { exe, title });
+            scored.push((is_probably_game(&path), WindowProc { exe, title }));
         }
     }
-    out.sort_by_key(|a| a.title.to_lowercase());
-    out
+    scored.sort_by_key(|(game, wp)| (!*game, wp.title.to_lowercase()));
+    scored.into_iter().map(|(_, wp)| wp).collect()
 }
 
 /// EnumWindows callback: collect (pid, title) for visible, titled top-level windows.
@@ -128,8 +141,8 @@ extern "system" fn enum_window_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-/// Resolve a pid to its lowercased exe basename via the full image path.
-fn exe_for_pid(pid: u32) -> Option<String> {
+/// Resolve a pid to its full lowercased image path.
+fn path_for_pid(pid: u32) -> Option<String> {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = vec![0u16; 260];
@@ -143,8 +156,27 @@ fn exe_for_pid(pid: u32) -> Option<String> {
         let _: windows::core::Result<()> = CloseHandle(handle);
         ok.ok()?;
         let path = String::from_utf16_lossy(&buf[..size as usize]);
-        path.rsplit(['\\', '/']).next().map(|s| s.to_lowercase())
+        Some(path.to_lowercase())
     }
+}
+
+/// Heuristic "this is probably a game": installed under a storefront library
+/// dir, or carrying an engine-style exe name (UE's *-Win64-Shipping.exe etc.).
+/// Only used to rank the picker — never to filter, so a miss just sorts lower.
+fn is_probably_game(path: &str) -> bool {
+    const DIR_HINTS: &[&str] = &[
+        "steamapps",
+        "epic games",
+        "gog galaxy",
+        "gog games",
+        "riot games",
+        "battle.net",
+        "origin games",
+        "ea games",
+        "xboxgames",
+    ];
+    const NAME_HINTS: &[&str] = &["shipping", "-win64-", "-wingdk-"];
+    DIR_HINTS.iter().any(|h| path.contains(h)) || NAME_HINTS.iter().any(|h| path.contains(h))
 }
 
 /// Filter obvious OS/background clutter from the user-facing process picker.
@@ -174,6 +206,15 @@ fn is_noise(exe: &str) -> bool {
         "wmiprvse.exe",
         "spoolsv.exe",
         "audiodg.exe",
+        // Shell/system apps that own visible windows but are never games.
+        "explorer.exe",
+        "systemsettings.exe",
+        "shellexperiencehost.exe",
+        "startmenuexperiencehost.exe",
+        "searchapp.exe",
+        "lockapp.exe",
+        "widgets.exe",
+        "msedgewebview2.exe",
     ];
     NOISE.contains(&exe)
 }

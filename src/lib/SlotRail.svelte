@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Preset, WindowProc } from "./api";
   import { slotAccent, listWindowPrograms } from "./api";
-  import { Pencil, Trash2, Lock, Link2, Unlink, RotateCw, Gamepad2, Plus, FilePlus2, ChevronDown } from "lucide-svelte";
+  import { Pencil, Trash2, Lock, Link2, Unlink, RotateCw, Gamepad2, Plus, FilePlus2, ChevronDown, X } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
   interface Props {
@@ -148,6 +148,11 @@
   async function openCreateFromGame() {
     await openBinderFor({ mode: "create" });
   }
+  // Open the binder for a slot from outside the rail (main-panel "Bind…" link).
+  export async function openBindFor(slot: string) {
+    if (slot === "Normal") return;
+    await openBinderFor({ mode: "bind", slot });
+  }
   function closeBinder() {
     binder = null;
   }
@@ -214,7 +219,7 @@
 </script>
 
 <svelte:window
-  onkeydown={(e) => e.key === "Escape" && (closeMenu(), closeAdd())}
+  onkeydown={(e) => e.key === "Escape" && (closeMenu(), closeAdd(), closeBinder())}
   onblur={() => (closeMenu(), closeAdd())}
 />
 
@@ -332,8 +337,18 @@
     aria-label="Close binder"
     onclick={closeBinder}
   ></button>
-  <div class="binder" role="dialog" aria-modal="true" aria-label="Bind program to preset" tabindex="-1" use:focusOnMount>
+  <div
+    class="binder"
+    role="dialog"
+    aria-modal="true"
+    aria-label={binder.mode === "create" ? "Create preset from a game" : "Bind program to preset"}
+    tabindex="-1"
+    use:focusOnMount
+  >
     <div class="binder-glow"></div>
+    <button class="binder-close" aria-label="Close" title="Close" onclick={closeBinder}>
+      <X size={14} />
+    </button>
     <header class="binder-head">
       <div class="binder-icon"><Gamepad2 size={18} /></div>
       <div class="binder-head-text">
@@ -480,7 +495,10 @@
     padding: 1px 5px;
     outline: none;
   }
-  .rename:focus { border-color: var(--border-focus); }
+  .rename:focus {
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border-strong));
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 18%, transparent);
+  }
   .add-wrap { position: relative; flex-shrink: 0; }
   .new {
     display: flex;
@@ -645,6 +663,22 @@
     pointer-events: none;
     box-shadow: inset 0 0 60px color-mix(in oklab, var(--accent) 5%, transparent);
   }
+  .binder-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .binder-close:hover { background: var(--surface-hover); color: var(--fg); }
   .binder-head {
     display: flex;
     align-items: flex-start;
