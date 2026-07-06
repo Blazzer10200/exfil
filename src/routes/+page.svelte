@@ -5,6 +5,7 @@
   import { RotateCcw, Save, Cpu, CircleAlert, Gamepad2, CheckCircle2, XCircle } from "lucide-svelte";
   import Titlebar from "$lib/Titlebar.svelte";
   import SlotRail from "$lib/SlotRail.svelte";
+  import SettingsModal from "$lib/SettingsModal.svelte";
   import Slider from "$lib/Slider.svelte";
   import {
     getStatus,
@@ -34,6 +35,7 @@
   let status = $state<SystemStatus | null>(null);
   let busy = $state(false);
   let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
+  let settingsOpen = $state(false);
 
   const current = $derived(presets.find((p) => p.slot === active));
   const readOnly = $derived(active === "Normal");
@@ -263,7 +265,7 @@
 </script>
 
 <div class="app">
-  <Titlebar onimport={onImport} onexport={onExport} onerror={(msg) => flash(msg, "err")} />
+  <Titlebar onsettings={() => (settingsOpen = true)} />
 
   <div class="body">
     <SlotRail
@@ -404,6 +406,21 @@
       </footer>
     </main>
   </div>
+
+  {#if settingsOpen}
+    <SettingsModal
+      onclose={() => (settingsOpen = false)}
+      onimport={() => {
+        settingsOpen = false;
+        onImport();
+      }}
+      onexport={() => {
+        settingsOpen = false;
+        onExport();
+      }}
+      onerror={(msg) => flash(msg, "err")}
+    />
+  {/if}
 </div>
 
 <style>

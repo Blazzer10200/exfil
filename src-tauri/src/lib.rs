@@ -240,6 +240,37 @@ fn reset_display(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Open an https URL in the user's default browser (settings-page links).
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("only https URLs can be opened".into());
+    }
+    std::process::Command::new("explorer")
+        .arg(&url)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Launch the NSIS uninstaller that the setup wizard drops next to the exe,
+/// then quit so it can remove the files (RunEvent::Exit restores native color
+/// on the way out). Portable/dev copies have no uninstaller — clean error.
+#[tauri::command]
+fn uninstall_app(app: tauri::AppHandle) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let uninstaller = exe
+        .parent()
+        .map(|dir| dir.join("uninstall.exe"))
+        .filter(|p| p.exists())
+        .ok_or("No uninstaller found — this copy of EXFIL wasn't installed with the setup wizard. Just delete the .exe to remove it.")?;
+    std::process::Command::new(&uninstaller)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
+}
+
 /// An action picked in the styled tray-menu popup. Hides the popup first so it
 /// never lingers over the action's result.
 #[tauri::command]
@@ -326,6 +357,8 @@ pub fn run() {
             get_autostart,
             set_autostart,
             tray_action,
+            open_url,
+            uninstall_app,
         ])
         .setup(|app| {
             // Start-with-Windows honors the stored preference (default on) —

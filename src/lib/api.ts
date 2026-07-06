@@ -85,6 +85,12 @@ export const getAutostart = () => invoke<boolean>("get_autostart");
 export const setAutostart = (enabled: boolean) =>
   invoke<boolean>("set_autostart", { enabled });
 
+// Settings-page system actions. uninstallApp launches the NSIS uninstaller and
+// exits the app (errors if this copy wasn't installed via the setup wizard);
+// openUrl opens an https link in the default browser.
+export const uninstallApp = () => invoke<void>("uninstall_app");
+export const openUrl = (url: string) => invoke<void>("open_url", { url });
+
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).
 const ACCENT_CYCLE = [
