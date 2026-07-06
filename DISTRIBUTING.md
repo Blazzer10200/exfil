@@ -17,10 +17,15 @@ debloated/offline machine might not).
 
 ## What already Just Works on another PC
 
-- **Non-NVIDIA GPUs (AMD/Intel).** `Nvapi::load()` tries to load `nvapi64.dll`
-  and returns `None` on failure instead of erroring — the app runs fine,
-  vibrance just shows "No NVAPI" and the slider disables itself. Gamma/
-  brightness/contrast work on any GPU.
+- **NVIDIA and AMD GPUs both get vibrance.** The backend probes `nvapi64.dll`
+  first, then AMD's `atiadlxx.dll` (ADL display saturation — the control Radeon
+  software exposes). Neither driver found (Intel etc.) → the chip shows "Gamma
+  only" and the slider disables itself; everything else keeps working.
+  *Heads-up:* the AMD path is built defensively (a display is only used if the
+  driver confirms saturation support live) but was written on an NVIDIA-only
+  dev machine — it fails closed to gamma-only rather than crashing, so if an
+  AMD friend sees "Gamma only" unexpectedly, that's the safety net firing;
+  report it. Gamma/brightness/contrast work on any GPU regardless.
 - **Different monitor counts/layouts.** `gamma::display_dcs()` probes
   `\\.\DISPLAY1..16` live and only keeps ones that actually support gamma
   ramps — no assumption baked in about a specific setup.
@@ -41,9 +46,11 @@ debloated/offline machine might not).
    active. If sliders act weird, **Normal** always restores native color —
    it's a full reset, not a stored preset.
 3. **First launch creates its own preset file** — nothing carries over from
-   your machine. If you want to share your presets, use **Export** (titlebar
-   `⋮` menu) → hand them the JSON → they **Import** it on their end. Import
-   is additive, so it won't clobber anything they've already made.
+   your machine. If you want to share your presets, use **Export** (Settings,
+   the titlebar cogwheel) → hand them the JSON → they **Import** it on their
+   end. Import is additive, so it won't clobber anything they've already made,
+   and it rescales vibrance if their GPU vendor (and therefore vibrance scale)
+   differs from yours.
 
 ## Not done (intentionally, for a "couple of buddies" scale)
 

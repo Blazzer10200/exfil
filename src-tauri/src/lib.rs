@@ -1,14 +1,16 @@
 //! EXFIL v2 — Tauri backend entry. Wires the NVAPI vibrance + GDI gamma core
 //! and preset store into IPC commands consumed by the Svelte frontend.
 
+mod amd;
 mod gamma;
 mod nvapi;
 mod store;
+mod vibrance;
 mod watcher;
 
 use gamma::ColorDials;
-use nvapi::{Nvapi, VibranceInfo};
-use store::{Preset, PresetStore};
+use store::{Preset, PresetStore, VibranceScale};
+use vibrance::{Vibrance, VibranceInfo};
 use std::sync::Mutex;
 use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -16,10 +18,10 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-/// Shared app state. NVAPI handle is optional — non-NVIDIA machines still run
-/// (gamma works; vibrance commands return a clean error).
+/// Shared app state. The vibrance backend is optional — machines without an
+/// NVIDIA or AMD driver still run (gamma works; vibrance returns a clean error).
 struct AppState {
-    nvapi: Option<Nvapi>,
+    vibrance: Option<Vibrance>,
     store: Mutex<PresetStore>,
     /// The slot the USER last picked by hand. The watcher reverts here when no
     /// bound program is running (revert-to-last-manual-pick).
@@ -36,17 +38,30 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[derive(serde::Serialize)]
 struct SystemStatus {
-    nvidia: bool,
+    /// GPU vendor providing vibrance ("nvidia"/"amd"), or None = gamma only.
+    vendor: Option<&'static str>,
     vibrance: Option<VibranceInfo>,
 }
 
 #[tauri::command]
 fn get_status(state: State<AppState>) -> SystemStatus {
-    let vibrance = state.nvapi.as_ref().and_then(|n| n.get_vibrance().ok());
+    let vibrance = state.vibrance.as_ref().and_then(|v| v.get().ok());
     SystemStatus {
-        nvidia: state.nvapi.is_some(),
+        vendor: state.vibrance.as_ref().map(|v| v.vendor()),
         vibrance,
     }
+}
+
+/// The active vendor's vibrance scale, for stamping exports and rescaling
+/// imports. Falls back to the measured legacy NVIDIA scale — also what's
+/// assumed for old export files that predate the scale stamp.
+fn vib_scale(state: &AppState) -> VibranceScale {
+    state
+        .vibrance
+        .as_ref()
+        .and_then(|v| v.get().ok())
+        .map(|i| VibranceScale { min: i.min, max: i.max, default: i.default })
+        .unwrap_or(store::LEGACY_SCALE)
 }
 
 #[tauri::command]
@@ -68,8 +83,8 @@ fn apply_color(
 /// slider drag) and `apply_slot` (preset select) so both paths stay identical.
 fn apply_dials_and_vibrance(state: &AppState, dials: ColorDials, vibrance: i32) -> Result<(), String> {
     gamma::apply_dials(dials)?;
-    if let Some(nv) = state.nvapi.as_ref() {
-        nv.set_vibrance(vibrance)?;
+    if let Some(v) = state.vibrance.as_ref() {
+        v.set(vibrance)?;
     }
     Ok(())
 }
@@ -100,8 +115,8 @@ fn apply_slot(state: &AppState, slot: &str) -> Result<Preset, String> {
     };
     if slot == "Normal" {
         gamma::reset()?;
-        if let Some(nv) = state.nvapi.as_ref() {
-            nv.reset_vibrance_to_default()?;
+        if let Some(v) = state.vibrance.as_ref() {
+            v.reset_to_default()?;
         }
     } else {
         apply_dials_and_vibrance(state, preset.dials, preset.vibrance)?;
@@ -128,11 +143,18 @@ fn save_preset(
     s.save()
 }
 
-/// Create a new user preset (seeded neutral) and return it. Frontend appends + selects it.
+/// Create a new user preset (seeded neutral) and return it. Frontend appends +
+/// selects it. "Neutral" vibrance is the DRIVER's default level, not 0 — on
+/// AMD's saturation scale 0 would seed a grayscale preset.
 #[tauri::command]
 fn create_preset(state: State<AppState>, name: String) -> Result<Preset, String> {
+    let default_vib = state.vibrance.as_ref().map(|v| v.default_level()).unwrap_or(0);
     let mut s = lock(&state.store);
-    let p = s.add(name);
+    let mut p = s.add(name);
+    if default_vib != 0 {
+        s.update(&p.slot, p.dials, default_vib);
+        p.vibrance = default_vib;
+    }
     s.save()?;
     Ok(p)
 }
@@ -182,7 +204,8 @@ fn list_window_programs() -> Vec<watcher::WindowProc> {
 /// frontend save dialog. Shareable / a backup; slot keys + bindings are dropped.
 #[tauri::command]
 fn export_presets(state: State<AppState>, path: String) -> Result<(), String> {
-    let json = lock(&state.store).export_json()?;
+    let scale = vib_scale(&state);
+    let json = lock(&state.store).export_json(scale)?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
@@ -191,8 +214,9 @@ fn export_presets(state: State<AppState>, path: String) -> Result<(), String> {
 #[tauri::command]
 fn import_presets(state: State<AppState>, path: String) -> Result<PresetStore, String> {
     let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let scale = vib_scale(&state);
     let mut s = lock(&state.store);
-    s.import_json(&json)?;
+    s.import_json(&json, scale)?;
     s.save()?;
     Ok(s.clone())
 }
@@ -226,8 +250,8 @@ fn do_reset(state: &AppState) {
     if let Err(e) = gamma::reset() {
         log::warn!("gamma reset failed: {e}");
     }
-    if let Some(nv) = state.nvapi.as_ref() {
-        if let Err(e) = nv.reset_vibrance_to_default() {
+    if let Some(v) = state.vibrance.as_ref() {
+        if let Err(e) = v.reset_to_default() {
             log::warn!("vibrance reset failed: {e}");
         }
     }
@@ -308,16 +332,15 @@ fn tray_action(
 pub fn run() {
     env_logger::init();
 
-    let nvapi = Nvapi::load();
-    if nvapi.is_some() {
-        log::info!("NVAPI initialized — digital vibrance available");
-    } else {
-        log::warn!("NVAPI unavailable — vibrance disabled, gamma still works");
+    let vibrance = Vibrance::load();
+    match vibrance.as_ref() {
+        Some(v) => log::info!("{} vibrance backend initialized", v.vendor()),
+        None => log::warn!("no vibrance backend (NVIDIA/AMD driver not found) — gamma still works"),
     }
 
     let store = PresetStore::load();
     let state = AppState {
-        nvapi,
+        vibrance,
         manual_active: Mutex::new(store.active.clone()),
         store: Mutex::new(store),
     };
@@ -463,8 +486,8 @@ pub fn run() {
                     if let Err(e) = gamma::apply_dials(p.dials) {
                         log::warn!("boot-time gamma apply failed: {e}");
                     }
-                    if let Some(nv) = state.nvapi.as_ref() {
-                        if let Err(e) = nv.set_vibrance(p.vibrance) {
+                    if let Some(v) = state.vibrance.as_ref() {
+                        if let Err(e) = v.set(p.vibrance) {
                             log::warn!("boot-time vibrance apply failed: {e}");
                         }
                     }

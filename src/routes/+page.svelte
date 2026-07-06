@@ -40,6 +40,17 @@
   const current = $derived(presets.find((p) => p.slot === active));
   const readOnly = $derived(active === "Normal");
   const vibranceMax = $derived(status?.vibrance?.max ?? 63);
+  const vibranceMin = $derived(status?.vibrance?.min ?? 0);
+  // Preview saturation, normalized around the driver's DEFAULT level so the
+  // neutral point previews identically across vendors (NVIDIA default 0,
+  // AMD saturation default ~100): 0 at default, 1 at max, negative below.
+  const vibranceNorm = $derived.by(() => {
+    const info = status?.vibrance;
+    if (!info) return 0;
+    if (vibrance >= info.default)
+      return info.max > info.default ? (vibrance - info.default) / (info.max - info.default) : 0;
+    return info.default > info.min ? (vibrance - info.default) / (info.default - info.min) : 0;
+  });
   const dirty = $derived(
     !!current &&
       (current.dials.gamma !== dials.gamma ||
@@ -296,17 +307,17 @@
             </p>
           </div>
           <div class="status">
-            {#if status?.nvidia}
-              <span class="chip ok"><Cpu size={13} /> NVIDIA</span>
+            {#if status?.vendor}
+              <span class="chip ok"><Cpu size={13} /> {status.vendor === "amd" ? "AMD" : "NVIDIA"}</span>
             {:else}
-              <span class="chip warn"><CircleAlert size={13} /> No NVAPI</span>
+              <span class="chip warn"><CircleAlert size={13} /> Gamma only</span>
             {/if}
           </div>
         </header>
       {/key}
 
       <section class="controls card">
-        <div class="preview" style="--p-brightness: {dials.brightness}; --p-contrast: {dials.contrast}; --p-vibrance: {vibranceMax ? vibrance / vibranceMax : 0};">
+        <div class="preview" style="--p-brightness: {dials.brightness}; --p-contrast: {dials.contrast}; --p-vibrance: {vibranceNorm};">
           <div class="preview-stage">
             <div class="orb"></div>
             <div class="chips">
@@ -355,18 +366,18 @@
             <Slider
               label="Digital Vibrance"
               bind:value={vibrance}
-              min={0}
+              min={vibranceMin}
               max={vibranceMax}
               step={1}
-              disabled={readOnly || !status?.nvidia}
+              disabled={readOnly || !status?.vendor}
               format={(v) => `${Math.round((v / vibranceMax) * 100)}%`}
               onchange={liveApply}
             />
             <div class="vibrance-note">
-              {#if !status?.nvidia}
-                Vibrance needs an NVIDIA GPU.
+              {#if !status?.vendor}
+                Vibrance needs an NVIDIA or AMD GPU — gamma still works.
               {:else}
-                Level {vibrance} / {vibranceMax} · driver-level, BattlEye-safe.
+                Level {vibrance} / {vibranceMax} · driver-level, anti-cheat safe.
               {/if}
             </div>
             {#if !readOnly}
@@ -515,7 +526,7 @@
     filter:
       brightness(calc(1 + var(--p-brightness, 0)))
       contrast(var(--p-contrast, 1))
-      saturate(calc(1 + var(--p-vibrance, 0) * 1.6));
+      saturate(max(0, calc(1 + var(--p-vibrance, 0) * 1.6)));
     transition: filter 60ms linear;
   }
   .chips {
@@ -533,7 +544,7 @@
     filter:
       brightness(calc(1 + var(--p-brightness, 0)))
       contrast(var(--p-contrast, 1))
-      saturate(calc(1 + var(--p-vibrance, 0) * 1.6));
+      saturate(max(0, calc(1 + var(--p-vibrance, 0) * 1.6)));
     transition: filter 60ms linear, transform 140ms var(--ease-soft, ease);
   }
   .ramp {

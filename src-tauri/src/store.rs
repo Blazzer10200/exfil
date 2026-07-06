@@ -7,12 +7,64 @@ use crate::gamma::ColorDials;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// A vendor's vibrance level range, stamped into export files so imports on a
+/// machine with a DIFFERENT GPU/driver can rescale values. Ranges are whatever
+/// the driver reports at runtime (measured NVIDIA here: 0..=100 default 50;
+/// AMD saturation typically 0..=200 default 100) — carrying raw numbers across
+/// scales would badly shift saturation, e.g. grayscale on AMD.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct VibranceScale {
+    pub min: i32,
+    pub max: i32,
+    pub default: i32,
+}
+
+/// Legacy export files predate the scale stamp. They all came from NVIDIA
+/// machines whose GetDVCInfoEx reports 0..=100 default 50 (measured live on
+/// the dev machine — NOT the "0..63" folklore scale).
+pub const LEGACY_SCALE: VibranceScale = VibranceScale { min: 0, max: 100, default: 50 };
+
+/// Map a level from one vendor scale onto another, preserving its position
+/// relative to the scale's NEUTRAL point (default), not its absolute value.
+/// Same-scale mapping is the identity.
+fn rescale_vibrance(v: i32, src: VibranceScale, dst: VibranceScale) -> i32 {
+    let t = if v >= src.default {
+        let span = (src.max - src.default) as f64;
+        if span <= 0.0 { 0.0 } else { (v - src.default) as f64 / span }
+    } else {
+        let span = (src.default - src.min) as f64;
+        if span <= 0.0 { 0.0 } else { (v - src.default) as f64 / span }
+    };
+    let out = if t >= 0.0 {
+        dst.default as f64 + t * (dst.max - dst.default) as f64
+    } else {
+        dst.default as f64 + t * (dst.default - dst.min) as f64
+    };
+    (out.round() as i32).clamp(dst.min, dst.max)
+}
+
+#[derive(Serialize)]
+struct ExportFile<'a> {
+    vibrance_scale: VibranceScale,
+    presets: Vec<&'a Preset>,
+}
+
+#[derive(Deserialize)]
+struct ImportFile {
+    vibrance_scale: Option<VibranceScale>,
+    presets: Vec<Preset>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Preset {
     pub slot: String,
     pub name: String,
     pub dials: ColorDials,
-    pub vibrance: i32, // 0..=63 (NVAPI Ex scale)
+    /// Level in the machine's own driver-reported vibrance scale (measured
+    /// NVIDIA here: 0..=100 default 50; AMD saturation typically 0..=200
+    /// default 100). Applies are clamped into range; cross-vendor imports are
+    /// rescaled via the VibranceScale stamped into export files.
+    pub vibrance: i32,
     /// Bound program: a lowercased exe basename (e.g. "cs2.exe"). When that
     /// process is running, the watcher auto-applies this preset; None = unbound.
     #[serde(default)]
@@ -189,20 +241,32 @@ impl PresetStore {
     }
 
     /// Serialize the user presets (everything except the fixed Normal baseline)
-    /// to a pretty JSON array for export/sharing. Slot keys + bindings are dropped
-    /// since they're machine-local — only name/dials/vibrance carry over.
-    pub fn export_json(&self) -> Result<String, String> {
-        let exported: Vec<&Preset> = self.presets.iter().filter(|p| p.slot != "Normal").collect();
-        serde_json::to_string_pretty(&exported).map_err(|e| e.to_string())
+    /// for export/sharing, stamped with this machine's vibrance scale so a
+    /// cross-vendor import can rescale. Slot keys + bindings are dropped since
+    /// they're machine-local — only name/dials/vibrance carry over.
+    pub fn export_json(&self, scale: VibranceScale) -> Result<String, String> {
+        let file = ExportFile {
+            vibrance_scale: scale,
+            presets: self.presets.iter().filter(|p| p.slot != "Normal").collect(),
+        };
+        serde_json::to_string_pretty(&file).map_err(|e| e.to_string())
     }
 
-    /// Import presets from an exported JSON array, appending each as a NEW user
-    /// preset with a fresh `p{next_id}` slot (additive — never overwrites existing
-    /// presets, never collides on keys). Imported bindings are cleared. Returns the
-    /// number of presets added.
-    pub fn import_json(&mut self, json: &str) -> Result<usize, String> {
-        let incoming: Vec<Preset> =
-            serde_json::from_str(json).map_err(|e| format!("invalid preset file: {e}"))?;
+    /// Import presets from an export file, appending each as a NEW user preset
+    /// with a fresh `p{next_id}` slot (additive — never overwrites existing
+    /// presets, never collides on keys). Imported bindings are cleared and
+    /// vibrance is rescaled from the file's vendor scale onto `dst`. Accepts
+    /// both the current `{vibrance_scale, presets}` shape and the legacy bare
+    /// array (NVIDIA-era exports). Returns the number of presets added.
+    pub fn import_json(&mut self, json: &str, dst: VibranceScale) -> Result<usize, String> {
+        let (src, incoming) = match serde_json::from_str::<ImportFile>(json) {
+            Ok(f) => (f.vibrance_scale.unwrap_or(LEGACY_SCALE), f.presets),
+            Err(_) => {
+                let legacy: Vec<Preset> = serde_json::from_str(json)
+                    .map_err(|e| format!("invalid preset file: {e}"))?;
+                (LEGACY_SCALE, legacy)
+            }
+        };
         let mut added = 0;
         for p in incoming {
             if p.slot == "Normal" {
@@ -213,7 +277,7 @@ impl PresetStore {
             self.add(p.name);
             if let Some(slot) = self.presets.last_mut() {
                 slot.dials = p.dials;
-                slot.vibrance = p.vibrance;
+                slot.vibrance = rescale_vibrance(p.vibrance, src, dst);
             }
             added += 1;
         }

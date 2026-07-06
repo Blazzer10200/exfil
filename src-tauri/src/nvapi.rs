@@ -7,7 +7,7 @@
 //! Flow: nvapi_QueryInterface(id) -> fn ptr -> call.
 //!   NvAPI_Initialize                0x0150E828
 //!   NvAPI_EnumNvidiaDisplayHandle   0x9ABDD40D
-//!   NvAPI_GetDVCInfoEx              0x0E45002D   (level scale 0..=63)
+//!   NvAPI_GetDVCInfoEx              0x0E45002D   (driver-reported scale; measured here 0..=100, default 50)
 //!   NvAPI_SetDVCLevelEx             0x4A82C2B1
 //!
 //! NO DLL injection. All vibrance writes go through the NVIDIA display driver.
@@ -15,6 +15,7 @@
 
 #![allow(non_snake_case)]
 
+use crate::vibrance::VibranceInfo;
 use std::os::raw::{c_int, c_void};
 
 type NvApiStatus = c_int; // 0 == NVAPI_OK
@@ -49,14 +50,6 @@ pub struct Nvapi {
     _lib: libloading::Library,
     query: FnQueryInterface,
     initialized: bool,
-}
-
-#[derive(serde::Serialize, Clone, Copy, Debug)]
-pub struct VibranceInfo {
-    pub current: i32,
-    pub min: i32,
-    pub max: i32,
-    pub default: i32,
 }
 
 impl Nvapi {

@@ -31,7 +31,8 @@ export interface VibranceInfo {
 }
 
 export interface SystemStatus {
-  nvidia: boolean;
+  /** GPU vendor providing vibrance, or null when only gamma is available. */
+  vendor: "nvidia" | "amd" | null;
   vibrance: VibranceInfo | null;
 }
 

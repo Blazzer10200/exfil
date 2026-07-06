@@ -18,12 +18,14 @@
 1. Download the latest `EXFIL_x.y.z_x64-setup.exe` from **[Releases](../../releases)** and run it.
 2. Windows will likely show a SmartScreen warning ("Windows protected your PC") because the
    installer is unsigned — click **More info → Run anyway**.
-3. That's it. EXFIL lives in the system tray, starts with Windows (toggleable from the
-   titlebar `⋮` menu), and installs per-user (no admin needed). The installer embeds the
-   WebView2 bootstrapper, so it works on machines that don't have WebView2 yet.
+3. That's it. EXFIL lives in the system tray, starts with Windows (toggleable in
+   Settings — the titlebar cogwheel), and installs per-user (no admin needed). The
+   installer embeds the WebView2 bootstrapper, so it works on machines that don't
+   have WebView2 yet.
 
 **Requirements:** Windows 10/11 x64. Gamma/brightness/contrast work on any GPU;
-**digital vibrance needs an NVIDIA GPU** (on AMD/Intel the slider simply disables itself).
+**digital vibrance needs an NVIDIA or AMD GPU** (on Intel or anything else the
+slider simply disables itself and everything else keeps working).
 
 More detail on running it on a machine that isn't yours — HDR caveats, AV false positives,
 sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
@@ -32,8 +34,10 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
 
 - **Gamma / brightness / contrast** — driver-level GDI gamma ramps (`Set/GetDeviceGammaRamp`),
   applied to **every gamma-capable monitor** (`\\.\DISPLAY1..N`, probed live).
-- **Digital vibrance** — NVAPI (`SetDVCLevelEx`) via raw `nvapi64.dll` `QueryInterface`,
-  applied to **every connected NVIDIA output** so a second monitor never keeps a stale value.
+- **Digital vibrance** — on NVIDIA via NVAPI (`SetDVCLevelEx`, raw `nvapi64.dll`
+  `QueryInterface`); on AMD via ADL display saturation (raw `atiadlxx.dll`, the same
+  control Radeon software exposes). Either way it's applied to **every connected
+  output** so a second monitor never keeps a stale value.
 - **Your own presets** — a fixed read-only **Normal** baseline (restores each monitor's
   native color) plus presets you create, rename, and delete, tuned live from the color
   controls. Persisted per-user; the last-active preset re-applies on boot.
@@ -47,16 +51,18 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   fullscreen games can't permanently steal the gamma.
 - **Always exits clean** — every exit path (tray Quit, OS shutdown) restores native
   gamma + vibrance, so the screen is never left tinted with no app to clear it.
-- **Import / export** — share presets as JSON (titlebar `⋮` menu); import is additive and
-  never overwrites.
+- **Import / export** — share presets as JSON (Settings page); import is additive, never
+  overwrites, and rescales vibrance when the file came from a machine with the other
+  GPU vendor.
 
 ## Anti-cheat safety
 
 EXFIL never touches game processes. Gamma goes through the Windows display driver
-(GDI), vibrance through NVIDIA's public NVAPI, and the auto-switch watcher only *reads*
-the process list (`CreateToolhelp32Snapshot` / `EnumWindows`) — no DLL injection, no
-hooks, no memory access. This is the same class of access the NVIDIA Control Panel and
-Windows itself use, which is what keeps it BattlEye / EAC-safe.
+(GDI), vibrance through NVIDIA's public NVAPI or AMD's public ADL, and the auto-switch
+watcher only *reads* the process list (`CreateToolhelp32Snapshot` / `EnumWindows`) — no
+DLL injection, no hooks, no memory access. This is the same class of access the NVIDIA
+Control Panel, AMD Radeon software, and Windows itself use, which is what keeps it
+BattlEye / EAC-safe.
 
 ## Build from source
 
@@ -73,7 +79,7 @@ Tagged pushes (`v*`) build the installer on CI and attach it to a draft GitHub R
 (see [`.github/workflows/release.yml`](.github/workflows/release.yml)).
 
 **Stack:** Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · hand-authored OKLCH
-CSS · TypeScript · Tauri 2 · Rust 2021 · `windows` crate (GDI) · raw NVAPI FFI.
+CSS · TypeScript · Tauri 2 · Rust 2021 · `windows` crate (GDI) · raw NVAPI + AMD ADL FFI.
 
 ## Data
 
