@@ -11,9 +11,8 @@ use nvapi::{Nvapi, VibranceInfo};
 use store::{Preset, PresetStore};
 use std::sync::Mutex;
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, State, WindowEvent,
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
@@ -241,6 +240,39 @@ fn reset_display(state: State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// An action picked in the styled tray-menu popup. Hides the popup first so it
+/// never lingers over the action's result.
+#[tauri::command]
+fn tray_action(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    action: String,
+) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("tray") {
+        let _ = w.hide();
+    }
+    match action.as_str() {
+        "show" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            Ok(())
+        }
+        "reset" => {
+            do_reset(&state);
+            Ok(())
+        }
+        "quit" => {
+            // NB: native-restore on quit is handled centrally in the
+            // RunEvent::Exit handler, so every exit path leaves the screen native.
+            app.exit(0);
+            Ok(())
+        }
+        _ => Err("unknown tray action".into()),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::init();
@@ -293,6 +325,7 @@ pub fn run() {
             reset_display,
             get_autostart,
             set_autostart,
+            tray_action,
         ])
         .setup(|app| {
             // Start-with-Windows honors the stored preference (default on) —
@@ -304,10 +337,33 @@ pub fn run() {
             }
 
             // ── System tray: Show / Reset display / Quit ──
-            let show_i = MenuItem::with_id(app, "show", "Show EXFIL", true, None::<&str>)?;
-            let reset_i = MenuItem::with_id(app, "reset", "Reset display", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_i, &reset_i, &quit_i])?;
+            // The menu is a styled webview popup (routes/tray), not the OS-native
+            // tray menu — Windows draws that one itself and it can't be themed to
+            // match the app. The popup window is frameless/transparent/always-on-
+            // top, shown at the cursor on tray click, hidden on focus loss; its
+            // items invoke `tray_action`.
+            let tray_menu = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("tray".into()))
+                .title("EXFIL menu")
+                .inner_size(224.0, 200.0)
+                .resizable(false)
+                .maximizable(false)
+                .minimizable(false)
+                .decorations(false)
+                .transparent(true)
+                .shadow(false)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .visible(false)
+                .focused(false)
+                .build()?;
+            {
+                let w = tray_menu.clone();
+                tray_menu.on_window_event(move |event| {
+                    if let WindowEvent::Focused(false) = event {
+                        let _ = w.hide();
+                    }
+                });
+            }
 
             let tray_icon = app.default_window_icon().cloned();
             let mut tray_builder = TrayIconBuilder::new().tooltip("EXFIL");
@@ -317,32 +373,24 @@ pub fn run() {
                 log::warn!("no default window icon set — tray icon will be blank");
             }
             tray_builder
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
-                        }
-                    }
-                    "reset" => do_reset(&app.state::<AppState>()),
-                    "quit" => app.exit(0),
-                    // NB: native-restore on quit is handled centrally in the
-                    // RunEvent::Exit handler below, so EVERY exit path (tray
-                    // Quit, OS shutdown, app.exit) leaves the screen at native.
-                    _ => {}
-                })
                 .on_tray_icon_event(|tray, event| {
-                    // Left-click the tray icon → show + focus the window.
+                    // Any click (left or right) → styled menu popup just above
+                    // the cursor. "tray-open" replays the entrance animation +
+                    // refocuses; focus loss hides it again.
                     if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
+                        position,
                         ..
                     } = event
                     {
                         let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
+                        if let Some(w) = app.get_webview_window("tray") {
+                            if let Ok(size) = w.outer_size() {
+                                let x = (position.x - size.width as f64).max(8.0);
+                                let y = (position.y - size.height as f64 - 8.0).max(8.0);
+                                let _ = w.set_position(PhysicalPosition::new(x as i32, y as i32));
+                            }
+                            let _ = app.emit_to("tray", "tray-open", ());
                             let _ = w.show();
                             let _ = w.set_focus();
                         }
