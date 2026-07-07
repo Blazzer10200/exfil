@@ -18,6 +18,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_updater::UpdaterExt;
 
 /// Shared app state. The vibrance backend is optional — machines without an
 /// NVIDIA or AMD driver still run (gamma works; vibrance returns a clean error).
@@ -369,6 +370,56 @@ fn uninstall_app(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Update metadata surfaced to the frontend ("update-available" event + the
+/// Settings "Check for updates" row).
+#[derive(Clone, serde::Serialize)]
+struct UpdateMeta {
+    version: String,
+    notes: String,
+}
+
+/// Check GitHub Releases for a newer signed build. Ok(None) = up to date.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Option<UpdateMeta>, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| UpdateMeta {
+        version: u.version.clone(),
+        notes: u.body.clone().unwrap_or_default(),
+    }))
+}
+
+/// Download + install the pending update, streaming "update-progress" (0..=100)
+/// so Settings can show download progress. The plugin verifies the artifact's
+/// minisign signature against the pubkey in tauri.conf.json before installing.
+/// On Windows the NSIS installer exits the app itself (RunEvent::Exit still
+/// restores native color); restart() is the non-Windows fallback.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("No update available — you're already on the latest version.")?;
+    let progress_app = app.clone();
+    let mut downloaded: u64 = 0;
+    update
+        .download_and_install(
+            move |chunk, total| {
+                downloaded += chunk as u64;
+                if let Some(total) = total {
+                    let pct = ((downloaded as f64 / total as f64) * 100.0).min(100.0) as u8;
+                    let _ = progress_app.emit("update-progress", pct);
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 /// An action picked in the styled tray-menu popup. Hides the popup first so it
 /// never lingers over the action's result.
 #[tauri::command]
@@ -436,6 +487,7 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Hotkey presses arrive here from the OS — no window focus involved,
         // which is the whole point (switch presets mid-game).
         .plugin(
@@ -479,6 +531,8 @@ pub fn run() {
             tray_action,
             open_url,
             uninstall_app,
+            check_update,
+            install_update,
         ])
         .setup(|app| {
             // Start-with-Windows honors the stored preference (default on) —
@@ -625,6 +679,33 @@ pub fn run() {
                     }
                 };
                 watcher::start(2000, bindings, on_change);
+            }
+
+            // ── Update check on boot ──
+            // Fire-and-forget against the GitHub Releases feed; a newer signed
+            // build emits "update-available" so the UI can surface a toast.
+            // Offline/unreachable is normal (debug-log only) — Settings keeps a
+            // manual "Check for updates" for that case.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match handle.updater() {
+                        Ok(updater) => match updater.check().await {
+                            Ok(Some(update)) => {
+                                let _ = handle.emit(
+                                    "update-available",
+                                    UpdateMeta {
+                                        version: update.version.clone(),
+                                        notes: update.body.clone().unwrap_or_default(),
+                                    },
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(e) => log::debug!("boot update check failed: {e}"),
+                        },
+                        Err(e) => log::debug!("updater unavailable: {e}"),
+                    }
+                });
             }
             Ok(())
         })

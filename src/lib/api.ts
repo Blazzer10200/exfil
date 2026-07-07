@@ -99,6 +99,15 @@ export const setHotkeys = (enabled: boolean) =>
 export const uninstallApp = () => invoke<void>("uninstall_app");
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 
+// Auto-update (GitHub Releases, signature-verified). checkUpdate resolves to
+// metadata for a newer build or null when up to date. installUpdate downloads +
+// installs, emitting "update-progress" (0..=100); on success the app restarts,
+// so the promise only settles on failure. The backend also checks on boot and
+// emits "update-available" with the same metadata shape.
+export type UpdateMeta = { version: string; notes: string };
+export const checkUpdate = () => invoke<UpdateMeta | null>("check_update");
+export const installUpdate = () => invoke<void>("install_update");
+
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).
 const ACCENT_CYCLE = [

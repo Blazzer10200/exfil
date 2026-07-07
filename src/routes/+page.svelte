@@ -70,6 +70,7 @@
   }
 
   let unlistenAuto: (() => void) | undefined;
+  let unlistenUpdate: (() => void) | undefined;
 
   onMount(async () => {
     try {
@@ -93,9 +94,18 @@
       if (idx >= 0) presets[idx] = p;
       flash(`Auto-switched to ${p.name}`);
     });
+
+    // Backend checks GitHub for a newer signed build on boot; surface it as a
+    // toast — the install itself lives in Settings → Updates.
+    unlistenUpdate = await listen<{ version: string }>("update-available", (e) => {
+      flash(`Update v${e.payload.version} available — install from Settings`);
+    });
   });
 
-  onMount(() => () => unlistenAuto?.());
+  onMount(() => () => {
+    unlistenAuto?.();
+    unlistenUpdate?.();
+  });
 
   async function onSelect(slot: string) {
     if (slot === active || busy) return;

@@ -1,6 +1,6 @@
 {
   "name": "exfil-v2",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "EXFIL — per-game color/gamma/vibrance preset tool. Tauri + Svelte rewrite.",
   "type": "module",
   "scripts": {

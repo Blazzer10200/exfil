@@ -4,8 +4,9 @@
   // and the uninstall flow (two-click confirm → NSIS uninstaller).
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
-  import { Settings, X, Power, Keyboard, Download, Upload, ExternalLink, Trash2, ShieldCheck } from "lucide-svelte";
-  import { getAutostart, setAutostart, getHotkeys, setHotkeys, uninstallApp, openUrl } from "./api";
+  import { listen } from "@tauri-apps/api/event";
+  import { Settings, X, Power, Keyboard, Download, Upload, ExternalLink, Trash2, ShieldCheck, RefreshCw } from "lucide-svelte";
+  import { getAutostart, setAutostart, getHotkeys, setHotkeys, uninstallApp, openUrl, checkUpdate, installUpdate } from "./api";
 
   interface Props {
     onclose: () => void;
@@ -22,6 +23,13 @@
   let uninstallError = $state("");
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // Auto-update flow: check → (available) install → progress → app restarts.
+  let updatePhase = $state<"idle" | "checking" | "none" | "available" | "installing">("idle");
+  let updateVersion = $state("");
+  let updateProgress = $state(0);
+  let upToDateTimer: ReturnType<typeof setTimeout> | undefined;
+  let unlistenProgress: (() => void) | undefined;
+
   onMount(() => {
     getVersion()
       .then((v) => (version = v))
@@ -32,8 +40,46 @@
     getHotkeys()
       .then((v) => (hotkeys = v))
       .catch((e) => onerror?.(String(e)));
-    return () => clearTimeout(confirmTimer);
+    return () => {
+      clearTimeout(confirmTimer);
+      clearTimeout(upToDateTimer);
+      unlistenProgress?.();
+    };
   });
+
+  async function doUpdate() {
+    if (updatePhase === "available") {
+      updatePhase = "installing";
+      updateProgress = 0;
+      try {
+        unlistenProgress = await listen<number>("update-progress", (e) => (updateProgress = e.payload));
+        // On success the app restarts into the new version — no code after this runs.
+        await installUpdate();
+      } catch (e) {
+        onerror?.(String(e));
+        updatePhase = "available";
+      } finally {
+        unlistenProgress?.();
+        unlistenProgress = undefined;
+      }
+      return;
+    }
+    updatePhase = "checking";
+    try {
+      const meta = await checkUpdate();
+      if (meta) {
+        updateVersion = meta.version;
+        updatePhase = "available";
+      } else {
+        updatePhase = "none";
+        clearTimeout(upToDateTimer);
+        upToDateTimer = setTimeout(() => (updatePhase = "idle"), 3000);
+      }
+    } catch (e) {
+      onerror?.(String(e));
+      updatePhase = "idle";
+    }
+  }
 
   async function toggleAutostart() {
     try {
@@ -159,6 +205,39 @@
         <span class="safe"><ShieldCheck size={12} /> Driver-level — no injection, anti-cheat safe</span>
       </div>
       <button class="act" onclick={github}><ExternalLink size={13} /> GitHub</button>
+    </div>
+    <div class="row">
+      <span class="row-icon"><RefreshCw size={15} /></span>
+      <div class="row-text">
+        <span class="row-title">Updates</span>
+        <span class="row-desc">
+          {#if updatePhase === "available"}
+            Version {updateVersion} is ready to install
+          {:else if updatePhase === "installing"}
+            Downloading &amp; installing — EXFIL restarts when done
+          {:else if updatePhase === "none"}
+            You're on the latest version
+          {:else}
+            Installed automatically from GitHub releases
+          {/if}
+        </span>
+      </div>
+      <button
+        class="act"
+        class:update-ready={updatePhase === "available"}
+        onclick={doUpdate}
+        disabled={updatePhase === "checking" || updatePhase === "installing"}
+      >
+        {#if updatePhase === "checking"}
+          Checking…
+        {:else if updatePhase === "installing"}
+          {updateProgress}%
+        {:else if updatePhase === "available"}
+          Install v{updateVersion}
+        {:else}
+          Check for updates
+        {/if}
+      </button>
     </div>
   </section>
 
@@ -359,6 +438,14 @@
     border-color: transparent;
     color: white;
     font-weight: 600;
+  }
+  .act.update-ready {
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 35%, transparent);
+    font-weight: 600;
+  }
+  .act.update-ready:hover {
+    background: var(--accent-soft);
   }
   .uninstall-error {
     margin: 0 2px;
