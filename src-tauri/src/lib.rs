@@ -17,6 +17,7 @@ use tauri::{
     Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Shared app state. The vibrance backend is optional — machines without an
 /// NVIDIA or AMD driver still run (gamma works; vibrance returns a clean error).
@@ -244,6 +245,79 @@ fn set_autostart(
     Ok(enabled)
 }
 
+/// Global hotkeys — work while the window is hidden / a game is fullscreen:
+/// Ctrl+Shift+F9 cycles presets, Ctrl+Shift+F10 snaps to Normal. Obscure
+/// combos on purpose so they don't collide with in-game binds.
+fn hotkey_cycle() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F9)
+}
+
+fn hotkey_normal() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F10)
+}
+
+fn register_hotkeys(app: &tauri::AppHandle) -> Result<(), String> {
+    let gs = app.global_shortcut();
+    gs.register(hotkey_cycle()).map_err(|e| e.to_string())?;
+    gs.register(hotkey_normal()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn unregister_hotkeys(app: &tauri::AppHandle) {
+    let gs = app.global_shortcut();
+    let _ = gs.unregister(hotkey_cycle());
+    let _ = gs.unregister(hotkey_normal());
+}
+
+/// The next slot in rail order after the active one (wraps; includes Normal so
+/// cycling doubles as an on/off toggle). None when only Normal exists.
+fn cycle_slot(state: &AppState) -> Option<String> {
+    let s = lock(&state.store);
+    if s.presets.len() < 2 {
+        return None;
+    }
+    let idx = s.presets.iter().position(|p| p.slot == s.active).unwrap_or(0);
+    Some(s.presets[(idx + 1) % s.presets.len()].slot.clone())
+}
+
+/// Apply a hotkey pick exactly like a hand-pick: it becomes the watcher's
+/// revert target, and "auto-switch" re-syncs the (possibly hidden) UI.
+fn hotkey_apply(app: &tauri::AppHandle, slot: String) {
+    let state = app.state::<AppState>();
+    match apply_slot(&state, &slot) {
+        Ok(p) => {
+            *lock(&state.manual_active) = slot;
+            let _ = app.emit("auto-switch", &p);
+        }
+        Err(e) => log::warn!("hotkey apply failed: {e}"),
+    }
+}
+
+/// Whether the global hotkeys are enabled (stored preference; default on).
+#[tauri::command]
+fn get_hotkeys(state: State<AppState>) -> bool {
+    lock(&state.store).hotkeys
+}
+
+/// Toggle the global hotkeys: (un)registers them live and persists the choice
+/// so boot-time setup honors it. Returns the new value.
+#[tauri::command]
+fn set_hotkeys(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+) -> Result<bool, String> {
+    if enabled {
+        register_hotkeys(&app)?;
+    } else {
+        unregister_hotkeys(&app);
+    }
+    let mut s = lock(&state.store);
+    s.hotkeys = enabled;
+    s.save()?;
+    Ok(enabled)
+}
+
 /// Reset display to neutral gamma + every monitor's native default vibrance
 /// (shared by the tray "Reset" item and the exit-time restore).
 fn do_reset(state: &AppState) {
@@ -362,6 +436,27 @@ pub fn run() {
             Some(vec!["--hidden"]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        // Hotkey presses arrive here from the OS — no window focus involved,
+        // which is the whole point (switch presets mid-game).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    let slot = if shortcut == &hotkey_cycle() {
+                        cycle_slot(&app.state::<AppState>())
+                    } else if shortcut == &hotkey_normal() {
+                        Some("Normal".into())
+                    } else {
+                        None
+                    };
+                    if let Some(slot) = slot {
+                        hotkey_apply(app, slot);
+                    }
+                })
+                .build(),
+        )
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -379,6 +474,8 @@ pub fn run() {
             reset_display,
             get_autostart,
             set_autostart,
+            get_hotkeys,
+            set_hotkeys,
             tray_action,
             open_url,
             uninstall_app,
@@ -390,6 +487,14 @@ pub fn run() {
                 let autostart = lock(&app.state::<AppState>().store).autostart;
                 let al = app.autolaunch();
                 let _ = if autostart { al.enable() } else { al.disable() };
+            }
+
+            // Global hotkeys honor the stored preference (default on). A failed
+            // registration (combo taken by another app) is non-fatal — warn only.
+            if lock(&app.state::<AppState>().store).hotkeys {
+                if let Err(e) = register_hotkeys(app.handle()) {
+                    log::warn!("global hotkey registration failed: {e}");
+                }
             }
 
             // ── System tray: Show / Reset display / Quit ──

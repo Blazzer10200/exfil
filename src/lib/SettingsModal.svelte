@@ -4,8 +4,8 @@
   // and the uninstall flow (two-click confirm → NSIS uninstaller).
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
-  import { Settings, X, Power, Download, Upload, ExternalLink, Trash2, ShieldCheck } from "lucide-svelte";
-  import { getAutostart, setAutostart, uninstallApp, openUrl } from "./api";
+  import { Settings, X, Power, Keyboard, Download, Upload, ExternalLink, Trash2, ShieldCheck } from "lucide-svelte";
+  import { getAutostart, setAutostart, getHotkeys, setHotkeys, uninstallApp, openUrl } from "./api";
 
   interface Props {
     onclose: () => void;
@@ -17,6 +17,7 @@
 
   let version = $state("");
   let autostart = $state(true);
+  let hotkeys = $state(true);
   let confirmUninstall = $state(false);
   let uninstallError = $state("");
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
@@ -28,12 +29,23 @@
     getAutostart()
       .then((v) => (autostart = v))
       .catch((e) => onerror?.(String(e)));
+    getHotkeys()
+      .then((v) => (hotkeys = v))
+      .catch((e) => onerror?.(String(e)));
     return () => clearTimeout(confirmTimer);
   });
 
   async function toggleAutostart() {
     try {
       autostart = await setAutostart(!autostart);
+    } catch (e) {
+      onerror?.(String(e));
+    }
+  }
+
+  async function toggleHotkeys() {
+    try {
+      hotkeys = await setHotkeys(!hotkeys);
     } catch (e) {
       onerror?.(String(e));
     }
@@ -91,6 +103,23 @@
         aria-checked={autostart}
         aria-label="Start with Windows"
         onclick={toggleAutostart}
+      >
+        <span class="knob"></span>
+      </button>
+    </div>
+    <div class="row">
+      <span class="row-icon"><Keyboard size={15} /></span>
+      <div class="row-text">
+        <span class="row-title">Global hotkeys</span>
+        <span class="row-desc">Ctrl+Shift+F9 cycles presets · Ctrl+Shift+F10 restores Normal</span>
+      </div>
+      <button
+        class="switch"
+        class:on={hotkeys}
+        role="switch"
+        aria-checked={hotkeys}
+        aria-label="Global hotkeys"
+        onclick={toggleHotkeys}
       >
         <span class="knob"></span>
       </button>

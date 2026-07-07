@@ -46,6 +46,9 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   game (**Add preset → From a running program…**), or bind/unbind from the preset's
   right-click menu or the main panel. Detection is a read-only window/process enumeration —
   no injection, no hooks.
+- **Global hotkeys** — **Ctrl+Shift+F9** cycles through your presets, **Ctrl+Shift+F10**
+  snaps back to Normal — from inside a game, with EXFIL hidden in the tray (toggleable
+  in Settings).
 - **Lives in the tray** — closing the window hides to tray; the tray menu has
   **Show / Reset display / Quit**. The active ramp is re-asserted on an interval so
   fullscreen games can't permanently steal the gamma.

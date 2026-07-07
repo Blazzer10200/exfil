@@ -88,6 +88,9 @@ pub struct PresetStore {
     /// Launch EXFIL when Windows starts (drives the HKCU Run key on boot).
     #[serde(default = "default_true")]
     pub autostart: bool,
+    /// Global hotkeys enabled (Ctrl+Shift+F9 cycle / Ctrl+Shift+F10 Normal).
+    #[serde(default = "default_true")]
+    pub hotkeys: bool,
 }
 
 fn normal_preset() -> Preset {
@@ -107,6 +110,7 @@ impl Default for PresetStore {
             active: "Normal".into(),
             next_id: 1,
             autostart: true,
+            hotkeys: true,
         }
     }
 }
@@ -282,5 +286,123 @@ impl PresetStore {
             added += 1;
         }
         Ok(added)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NV: VibranceScale = VibranceScale { min: 0, max: 100, default: 50 };
+    const AMD: VibranceScale = VibranceScale { min: 0, max: 200, default: 100 };
+
+    #[test]
+    fn rescale_same_scale_is_identity() {
+        for v in [0, 25, 50, 75, 100] {
+            assert_eq!(rescale_vibrance(v, NV, NV), v);
+        }
+    }
+
+    #[test]
+    fn rescale_preserves_position_relative_to_default() {
+        assert_eq!(rescale_vibrance(50, NV, AMD), 100); // neutral → neutral
+        assert_eq!(rescale_vibrance(100, NV, AMD), 200); // max → max
+        assert_eq!(rescale_vibrance(0, NV, AMD), 0); // min → min
+        assert_eq!(rescale_vibrance(75, NV, AMD), 150); // halfway above neutral
+        assert_eq!(rescale_vibrance(150, AMD, NV), 75); // and back
+    }
+
+    #[test]
+    fn rescale_clamps_out_of_range_input() {
+        assert_eq!(rescale_vibrance(999, NV, AMD), 200);
+        assert_eq!(rescale_vibrance(-5, NV, AMD), 0);
+    }
+
+    #[test]
+    fn rescale_degenerate_span_maps_to_default() {
+        let flat = VibranceScale { min: 50, max: 50, default: 50 };
+        assert_eq!(rescale_vibrance(50, flat, AMD), 100);
+    }
+
+    #[test]
+    fn add_mints_monotonic_keys_never_reused() {
+        let mut s = PresetStore::default();
+        let a = s.add("A".into());
+        let b = s.add("B".into());
+        assert_eq!(a.slot, "p1");
+        assert_eq!(b.slot, "p2");
+        s.delete(&b.slot).unwrap();
+        assert_eq!(s.add("C".into()).slot, "p3"); // deleted key never reused
+    }
+
+    #[test]
+    fn add_blank_name_gets_placeholder() {
+        let mut s = PresetStore::default();
+        assert_eq!(s.add("   ".into()).name, "Preset 1");
+    }
+
+    #[test]
+    fn normal_is_protected() {
+        let mut s = PresetStore::default();
+        assert!(s.delete("Normal").is_err());
+        assert!(s.rename("Normal", "X".into()).is_err());
+        assert!(s.set_binding("Normal", Some("game.exe".into())).is_err());
+    }
+
+    #[test]
+    fn delete_active_falls_back_to_normal() {
+        let mut s = PresetStore::default();
+        let p = s.add("A".into());
+        s.active = p.slot.clone();
+        s.delete(&p.slot).unwrap();
+        assert_eq!(s.active, "Normal");
+    }
+
+    #[test]
+    fn binding_an_exe_clears_it_off_other_slots() {
+        let mut s = PresetStore::default();
+        let a = s.add("A".into());
+        let b = s.add("B".into());
+        s.set_binding(&a.slot, Some("Game.EXE".into())).unwrap();
+        s.set_binding(&b.slot, Some("game.exe".into())).unwrap();
+        // lowercased, and the exe moved off slot A — one program, one preset
+        assert_eq!(s.bindings(), vec![("game.exe".to_string(), b.slot.clone())]);
+    }
+
+    #[test]
+    fn export_skips_normal_import_is_additive_and_rescales() {
+        let mut src = PresetStore::default();
+        let p = src.add("Comp".into());
+        src.update(&p.slot, ColorDials::default(), 75);
+        let json = src.export_json(NV).unwrap();
+        assert!(!json.contains("\"Normal\""));
+
+        let mut dst = PresetStore::default();
+        let existing = dst.add("Mine".into());
+        let added = dst.import_json(&json, AMD).unwrap();
+        assert_eq!(added, 1);
+        assert_eq!(dst.presets.len(), 3); // Normal + Mine + imported
+        let imported = dst.presets.last().unwrap();
+        assert_ne!(imported.slot, existing.slot);
+        assert_eq!(imported.vibrance, 150); // 75 @ NV scale → 150 @ AMD scale
+        assert_eq!(imported.exe, None); // bindings are machine-local, dropped
+    }
+
+    #[test]
+    fn import_accepts_legacy_bare_array_as_nvidia_scale() {
+        let legacy = r#"[{"slot":"p9","name":"Old","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":100}]"#;
+        let mut s = PresetStore::default();
+        assert_eq!(s.import_json(legacy, AMD).unwrap(), 1);
+        let p = s.presets.last().unwrap();
+        assert_eq!(p.slot, "p1"); // fresh key, not the file's p9
+        assert_eq!(p.vibrance, 200); // legacy = NVIDIA scale, rescaled
+    }
+
+    #[test]
+    fn import_skips_normal_entries_and_rejects_garbage() {
+        let mut s = PresetStore::default();
+        let file = r#"{"vibrance_scale":{"min":0,"max":100,"default":50},"presets":[{"slot":"Normal","name":"Normal","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":50}]}"#;
+        assert_eq!(s.import_json(file, NV).unwrap(), 0);
+        assert!(s.import_json("not json", NV).is_err());
     }
 }

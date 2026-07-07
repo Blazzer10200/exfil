@@ -86,6 +86,13 @@ export const getAutostart = () => invoke<boolean>("get_autostart");
 export const setAutostart = (enabled: boolean) =>
   invoke<boolean>("set_autostart", { enabled });
 
+// Global hotkeys preference (Ctrl+Shift+F9 cycles presets, Ctrl+Shift+F10
+// snaps to Normal — handled backend-side, no window focus needed).
+// setHotkeys returns the new value.
+export const getHotkeys = () => invoke<boolean>("get_hotkeys");
+export const setHotkeys = (enabled: boolean) =>
+  invoke<boolean>("set_hotkeys", { enabled });
+
 // Settings-page system actions. uninstallApp launches the NSIS uninstaller and
 // exits the app (errors if this copy wasn't installed via the setup wizard);
 // openUrl opens an https link in the default browser.
