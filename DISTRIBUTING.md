@@ -31,6 +31,11 @@ debloated/offline machine might not).
   ramps — no assumption baked in about a specific setup.
 - **Presets are per-user.** Stored at `%APPDATA%\exfil-v2\presets.json`,
   created fresh on first run.
+- **It updates itself.** From v2.3.0 the app checks GitHub Releases on launch
+  and installs new versions from **Settings → Updates** (every update is
+  signature-verified before it runs). You only need to hand out the installer
+  once — copies older than 2.3.0 need one manual reinstall to get on the
+  update train.
 
 ## What to tell your friends before they run it
 
@@ -56,6 +61,5 @@ debloated/offline machine might not).
 
 - **No code signing.** Worth it if this ever goes wider; not worth the cost/
   process for a handful of friends who can click through SmartScreen once.
-- **No auto-update.** Re-send the installer if you ship a new build; Tauri's
-  updater plugin isn't wired in. Fine at this scale, adds real complexity
-  (signing + an update server/manifest) if added.
+  (Update artifacts ARE minisign-verified by the built-in updater — this is
+  about the Windows/SmartScreen certificate, a separate thing.)
