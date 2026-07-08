@@ -25,3 +25,6 @@ HANDOFF.md
 
 # Claude Code local runtime state
 .claude/
+
+# Internal working docs — local only
+/CLAUDE.md
