@@ -153,7 +153,8 @@ impl Nvapi {
         Ok(())
     }
 
-    /// Read current vibrance (0..=63 on the Ex scale) for the primary output.
+    /// Read current vibrance for the primary output, in the driver-reported
+    /// scale (measured here: 0..=100 default 50 — not the "0..63" folklore).
     pub fn get_vibrance(&self) -> Result<VibranceInfo, String> {
         let display = self.primary_display().ok_or("no NVIDIA display handle")?;
         self.get_vibrance_for(display)

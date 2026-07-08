@@ -145,7 +145,10 @@ extern "system" fn enum_window_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
 fn path_for_pid(pid: u32) -> Option<String> {
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let mut buf = vec![0u16; 260];
+        // Comfortably over MAX_PATH — deep storefront library paths would make
+        // QueryFullProcessImageNameW fail on a 260-char buffer and silently
+        // drop that game from the binder picker.
+        let mut buf = vec![0u16; 1024];
         let mut size = buf.len() as u32;
         let ok = QueryFullProcessImageNameW(
             handle,

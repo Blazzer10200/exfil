@@ -6,15 +6,17 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { listen } from "@tauri-apps/api/event";
   import { Settings, X, Power, Keyboard, Download, Upload, ExternalLink, Trash2, ShieldCheck, RefreshCw } from "lucide-svelte";
-  import { getAutostart, setAutostart, getHotkeys, setHotkeys, uninstallApp, openUrl, checkUpdate, installUpdate } from "./api";
+  import { getAutostart, setAutostart, getHotkeys, setHotkeys, uninstallApp, openUrl, checkUpdate, installUpdate, type UpdateMeta } from "./api";
 
   interface Props {
     onclose: () => void;
     onimport: () => void;
     onexport: () => void;
     onerror?: (message: string) => void;
+    /** Update the boot-time check already found, so the Updates row opens ready. */
+    knownUpdate?: UpdateMeta | null;
   }
-  let { onclose, onimport, onexport, onerror }: Props = $props();
+  let { onclose, onimport, onexport, onerror, knownUpdate = null }: Props = $props();
 
   let version = $state("");
   let autostart = $state(true);
@@ -31,6 +33,10 @@
   let unlistenProgress: (() => void) | undefined;
 
   onMount(() => {
+    if (knownUpdate) {
+      updateVersion = knownUpdate.version;
+      updatePhase = "available";
+    }
     getVersion()
       .then((v) => (version = v))
       .catch(() => {});

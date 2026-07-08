@@ -40,6 +40,7 @@
   </div>
   <input
     type="range"
+    aria-label={label}
     {min}
     {max}
     {step}

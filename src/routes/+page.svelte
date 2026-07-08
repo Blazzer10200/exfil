@@ -23,6 +23,7 @@
     type Preset,
     type ColorDials,
     type SystemStatus,
+    type UpdateMeta,
   } from "$lib/api";
 
   let presets = $state<Preset[]>([]);
@@ -36,10 +37,12 @@
   let busy = $state(false);
   let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
   let settingsOpen = $state(false);
+  // Update the boot-time check found (if any) — Settings opens ready to install.
+  let updateMeta = $state<UpdateMeta | null>(null);
 
   const current = $derived(presets.find((p) => p.slot === active));
   const readOnly = $derived(active === "Normal");
-  const vibranceMax = $derived(status?.vibrance?.max ?? 63);
+  const vibranceMax = $derived(status?.vibrance?.max ?? 100);
   const vibranceMin = $derived(status?.vibrance?.min ?? 0);
   // Preview saturation, normalized around the driver's DEFAULT level so the
   // neutral point previews identically across vendors (NVIDIA default 0,
@@ -59,9 +62,11 @@
         current.vibrance !== vibrance),
   );
 
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
   function flash(msg: string, kind: "ok" | "err" = "ok") {
     toast = { msg, kind };
-    setTimeout(() => (toast = null), 2200);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), 2200);
   }
 
   function loadInto(p: Preset) {
@@ -88,16 +93,21 @@
     // (and reverts on exit). Re-sync the UI to whatever it switched to.
     unlistenAuto = await listen<Preset>("auto-switch", (e) => {
       const p = e.payload;
-      active = p.slot;
-      loadInto(p);
       const idx = presets.findIndex((x) => x.slot === p.slot);
       if (idx >= 0) presets[idx] = p;
+      // The watcher re-announces the current slot (boot first-tick baseline,
+      // hotkey re-pick of the active preset) — only a real slot change should
+      // retune the dials + toast, or a no-op event clobbers unsaved edits.
+      if (p.slot === active) return;
+      active = p.slot;
+      loadInto(p);
       flash(`Auto-switched to ${p.name}`);
     });
 
     // Backend checks GitHub for a newer signed build on boot; surface it as a
-    // toast — the install itself lives in Settings → Updates.
-    unlistenUpdate = await listen<{ version: string }>("update-available", (e) => {
+    // toast, and remember it so Settings → Updates opens ready to install.
+    unlistenUpdate = await listen<UpdateMeta>("update-available", (e) => {
+      updateMeta = e.payload;
       flash(`Update v${e.payload.version} available — install from Settings`);
     });
   });
@@ -194,7 +204,6 @@
     try {
       const name = title.trim() || exe;
       const p = await createPreset(name);
-      await renamePreset(p.slot, name); // ensure title sticks even if create auto-named
       const store = await setBinding(p.slot, exe);
       presets = store.presets;
       await selectPreset(p.slot);
@@ -213,14 +222,18 @@
     if (busy || slot === "Normal") return;
     busy = true;
     try {
+      const wasActive = slot === active;
       const store = await deletePreset(slot);
       presets = store.presets;
-      active = store.active;
-      const p = presets.find((x) => x.slot === active);
-      if (p) {
-        // Deleting the active slot falls back to Normal → re-apply it.
-        await selectPreset(active);
-        loadInto(p);
+      if (wasActive) {
+        // Deleting the active slot falls back to Normal → re-apply it. Deleting
+        // any other slot leaves the current selection (and unsaved edits) alone.
+        active = store.active;
+        const p = presets.find((x) => x.slot === active);
+        if (p) {
+          await selectPreset(active);
+          loadInto(p);
+        }
       }
       flash("Preset deleted");
     } catch (e) {
@@ -430,6 +443,7 @@
 
   {#if settingsOpen}
     <SettingsModal
+      knownUpdate={updateMeta}
       onclose={() => (settingsOpen = false)}
       onimport={() => {
         settingsOpen = false;

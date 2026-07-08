@@ -13,7 +13,7 @@ export interface Preset {
   slot: string;
   name: string;
   dials: ColorDials;
-  vibrance: number; // 0..63 (NVAPI Ex scale)
+  vibrance: number; // level in the machine's driver-reported scale (see VibranceInfo)
   exe?: string | null; // bound program (lowercased exe basename) or null
 }
 
@@ -21,6 +21,8 @@ export interface PresetStore {
   presets: Preset[];
   active: string;
   next_id: number;
+  autostart: boolean;
+  hotkeys: boolean;
 }
 
 export interface VibranceInfo {

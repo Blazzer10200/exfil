@@ -57,6 +57,8 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
 - **Import / export** — share presets as JSON (Settings page); import is additive, never
   overwrites, and rescales vibrance when the file came from a machine with the other
   GPU vendor.
+- **Auto-update** — checks GitHub Releases on launch and installs from
+  **Settings → Updates**; every update is signature-verified before it runs.
 
 ## Anti-cheat safety
 

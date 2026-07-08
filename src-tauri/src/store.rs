@@ -140,7 +140,12 @@ impl PresetStore {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
         let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())
+        // Write-then-rename so a crash mid-write can never leave a truncated
+        // presets.json behind (load() would silently fall back to defaults,
+        // losing every preset).
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
     }
 
     pub fn get(&self, slot: &str) -> Option<&Preset> {
