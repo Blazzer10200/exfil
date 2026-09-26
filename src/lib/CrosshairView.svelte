@@ -39,6 +39,7 @@
 
   const PREVIEW = 200; // CSS px, main stage
   const INSET = 64; // CSS px, actual-size inset
+  const THUMB = 30; // CSS px, rail + per-game list thumbnails
   const ZOOMS = [1, 2, 4, 8];
   const COLORS = ["#00ff66", "#00e5ff", "#ffee00", "#ff3df2", "#ff3b3b", "#ffffff"];
   const OUTLINE_COLORS = ["#000000", "#ffffff"];
@@ -86,10 +87,34 @@
     return scratch;
   }
 
+  // Thumbnail = the crosshair fitted to a THUMB-sized device-pixel canvas:
+  // small ones get a crisp integer upscale, big ones a smooth downscale
+  // (pixelated downscaling drops whole lines).
+  function thumbUrl({ image, half }: CrosshairImage) {
+    let r = 1; // farthest drawn pixel edge from the center boundary
+    const d = image.data;
+    for (let y = 0; y < image.height; y++)
+      for (let x = 0; x < image.width; x++)
+        if (d[(y * image.width + x) * 4 + 3]) r = Math.max(r, x + 1 - half, half - x, y + 1 - half, half - y);
+    const px = Math.round(THUMB * (window.devicePixelRatio || 1));
+    const fit = (px * 0.36) / r; // content spans ~72% of the box
+    const z = fit >= 1 ? Math.min(3, Math.floor(fit)) : fit;
+    const cv = document.createElement("canvas");
+    cv.width = px;
+    cv.height = px;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return "";
+    ctx.imageSmoothingEnabled = z < 1;
+    ctx.imageSmoothingQuality = "high";
+    const mid = Math.floor(px / 2);
+    ctx.drawImage(toCanvas(image), mid - half * z, mid - half * z, image.width * z, image.height * z);
+    return cv.toDataURL();
+  }
+
   async function refreshThumb(id: string, s: CrosshairStyle) {
     try {
       const ci = await renderCrosshair(s);
-      thumbs[id] = toCanvas(ci.image).toDataURL();
+      thumbs[id] = thumbUrl(ci);
     } catch (e) {
       flash(String(e), "err");
     }
@@ -154,7 +179,7 @@
         const id = job.id;
         clearTimeout(thumbTimer);
         thumbTimer = setTimeout(() => {
-          if (id) thumbs[id] = toCanvas(ci.image).toDataURL();
+          if (id) thumbs[id] = thumbUrl(ci);
         }, 200);
       }
     } catch (e) {
@@ -650,11 +675,11 @@
     height: 30px;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
-    background: linear-gradient(180deg, oklch(0.52 0.05 230) 50%, oklch(0.24 0.03 135) 50%);
+    background: radial-gradient(circle at 50% 35%, oklch(0.36 0.008 250), oklch(0.2 0.006 250));
     box-shadow: inset 0 1px 0 color-mix(in oklab, white 10%, transparent), inset 0 0 0 1px oklch(0 0 0 / 0.35);
     overflow: hidden;
   }
-  .game-thumb img { max-width: 100%; max-height: 100%; object-fit: scale-down; image-rendering: pixelated; }
+  .game-thumb img { width: 100%; height: 100%; }
   .game-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .game-exe { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-subtle); flex-shrink: 0; }
   .games-empty { margin: 4px 0 2px; font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.6; }

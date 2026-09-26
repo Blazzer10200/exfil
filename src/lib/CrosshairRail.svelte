@@ -319,13 +319,13 @@
     height: 30px;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
-    background: linear-gradient(180deg, oklch(0.52 0.05 230) 50%, oklch(0.24 0.03 135) 50%);
+    background: radial-gradient(circle at 50% 35%, oklch(0.36 0.008 250), oklch(0.2 0.006 250));
     box-shadow: inset 0 1px 0 color-mix(in oklab, white 10%, transparent), inset 0 0 0 1px oklch(0 0 0 / 0.35);
     overflow: hidden;
   }
   .thumb.none { background: var(--field); color: var(--fg-subtle); }
   .item.active .thumb.none { color: var(--fg-2); }
-  .thumb img { max-width: 100%; max-height: 100%; object-fit: scale-down; image-rendering: pixelated; }
+  .thumb img { width: 100%; height: 100%; }
   .label { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rename {
     flex: 1;
