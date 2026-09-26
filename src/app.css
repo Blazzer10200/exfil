@@ -172,3 +172,64 @@ body {
 /* app drag region (custom titlebar) */
 .drag { -webkit-app-region: drag; app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
+
+/* ── Rail menus (shared by the preset and crosshair rails) ──
+   Right-click context menu + the "Add ▾" popover, glass-panel style. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+.ctxmenu,
+.add-menu {
+  z-index: 50;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 5%, transparent);
+  animation: ctx-in 110ms var(--ease-soft);
+}
+.ctxmenu { position: fixed; width: 180px; transform-origin: top left; }
+.add-menu { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; }
+/* Programmatic container focus (focusOnMount) shouldn't draw the UA ring;
+   keyboard focus on the items themselves gets the app ring token. */
+.ctxmenu:focus,
+.add-menu:focus { outline: none; }
+@keyframes ctx-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-3px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background 110ms ease, color 110ms ease, transform 80ms ease;
+}
+.ctx-item svg { flex-shrink: 0; opacity: 0.8; transition: opacity 110ms ease; }
+.ctx-item:hover { background: var(--surface-hover); color: var(--fg); }
+.ctx-item:hover svg { opacity: 1; }
+.ctx-item:active { transform: scale(0.98); }
+.ctx-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.ctx-item.danger:hover { background: var(--danger-soft); color: var(--danger); }
+.ctx-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctx-item:disabled:hover { background: transparent; color: var(--fg-2); }
+.ctx-item.locked { color: var(--fg-faint); cursor: default; font-size: var(--fs-xs); }
+.ctx-item.locked:hover { background: transparent; color: var(--fg-faint); }

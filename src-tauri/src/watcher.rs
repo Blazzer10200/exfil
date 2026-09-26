@@ -28,6 +28,18 @@ static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Snapshot of currently-running process exe basenames, lowercased.
 fn running_exes() -> Vec<String> {
+    process_list().into_iter().map(|(_, name)| name).collect()
+}
+
+/// Exe basename (lowercased) of one pid, via the same read-only snapshot —
+/// deliberately NOT OpenProcess, so the crosshair overlay never opens a handle
+/// on an anti-cheat-protected game while it polls the foreground window.
+pub fn exe_for_pid(pid: u32) -> Option<String> {
+    process_list().into_iter().find(|(p, _)| *p == pid).map(|(_, name)| name)
+}
+
+/// Snapshot of running processes as (pid, lowercased exe basename).
+fn process_list() -> Vec<(u32, String)> {
     let mut out = Vec::new();
     unsafe {
         let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
@@ -47,7 +59,7 @@ fn running_exes() -> Vec<String> {
                     .unwrap_or(entry.szExeFile.len());
                 let name = String::from_utf16_lossy(&entry.szExeFile[..end]).to_lowercase();
                 if !name.is_empty() {
-                    out.push(name);
+                    out.push((entry.th32ProcessID, name));
                 }
                 if Process32NextW(snap, &mut entry).is_err() {
                     break;

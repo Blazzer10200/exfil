@@ -3,7 +3,8 @@
   import { listen } from "@tauri-apps/api/event";
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { RotateCcw, Save, Cpu, CircleAlert, Gamepad2, CheckCircle2, XCircle } from "lucide-svelte";
-  import Titlebar from "$lib/Titlebar.svelte";
+  import Titlebar, { type View } from "$lib/Titlebar.svelte";
+  import CrosshairView from "$lib/CrosshairView.svelte";
   import SlotRail from "$lib/SlotRail.svelte";
   import SettingsModal from "$lib/SettingsModal.svelte";
   import Slider from "$lib/Slider.svelte";
@@ -37,6 +38,7 @@
   let busy = $state(false);
   let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
   let settingsOpen = $state(false);
+  let view = $state<View>("color");
   // Update the boot-time check found (if any) — Settings opens ready to install.
   let updateMeta = $state<UpdateMeta | null>(null);
 
@@ -299,8 +301,11 @@
 </script>
 
 <div class="app">
-  <Titlebar onsettings={() => (settingsOpen = true)} />
+  <Titlebar {view} onview={(v) => (view = v)} onsettings={() => (settingsOpen = true)} />
 
+  {#if view === "crosshair"}
+    <CrosshairView />
+  {:else}
   <div class="body">
     <SlotRail
       bind:this={rail}
@@ -440,6 +445,7 @@
       </footer>
     </main>
   </div>
+  {/if}
 
   {#if settingsOpen}
     <SettingsModal

@@ -163,7 +163,7 @@
       <span class="row-icon"><Keyboard size={15} /></span>
       <div class="row-text">
         <span class="row-title">Global hotkeys</span>
-        <span class="row-desc">Ctrl+Shift+F9 cycles presets · Ctrl+Shift+F10 restores Normal</span>
+        <span class="row-desc">Ctrl+Shift+F9 cycles presets · Ctrl+Shift+F10 restores Normal · Ctrl+Shift+F11 toggles crosshair</span>
       </div>
       <button
         class="switch"

@@ -110,6 +110,71 @@ export type UpdateMeta = { version: string; notes: string };
 export const checkUpdate = () => invoke<UpdateMeta | null>("check_update");
 export const installUpdate = () => invoke<void>("install_update");
 
+// ── Crosshairs ── (mirrors src-tauri/src/crosshair.rs; ranges are clamped backend-side)
+export type CrosshairStyle = {
+  color: string; // "#rrggbb"
+  opacity: number; // 0.1..1
+  arms: boolean;
+  length: number; // 1..40 px
+  thickness: number; // 1..10 px
+  gap: number; // 0..30 px
+  t_style: boolean; // hide the top arm
+  dot: boolean;
+  dot_size: number; // 1..10 px
+  ring: boolean;
+  ring_radius: number; // 2..60 px
+  ring_thickness: number; // 1..6 px
+  outline: boolean;
+  outline_thickness: number; // 1..3 px
+  outline_color: string;
+  offset_x: number; // -50..50 px on-screen nudge
+  offset_y: number;
+};
+
+export type Crosshair = {
+  id: string;
+  name: string;
+  style: CrosshairStyle;
+  exe?: string | null; // bound = switches in while this program is in front
+};
+
+// `selected` value for "no crosshair outside bound games" (crosshair.rs NONE).
+export const NO_CROSSHAIR = "none";
+
+export type CrosshairStore = {
+  crosshairs: Crosshair[];
+  selected: string; // the user's pick, or NO_CROSSHAIR
+  enabled: boolean; // master overlay switch (Ctrl+Shift+F11)
+  next_id: number;
+};
+
+export const getCrosshairs = () => invoke<CrosshairStore>("get_crosshairs");
+export const createCrosshair = (name: string, style: CrosshairStyle | null) =>
+  invoke<Crosshair>("create_crosshair", { name, style });
+export const updateCrosshair = (id: string, style: CrosshairStyle) =>
+  invoke<void>("update_crosshair", { id, style });
+export const renameCrosshair = (id: string, name: string) =>
+  invoke<void>("rename_crosshair", { id, name });
+export const deleteCrosshair = (id: string) =>
+  invoke<CrosshairStore>("delete_crosshair", { id });
+export const selectCrosshair = (id: string) => invoke<void>("select_crosshair", { id });
+export const setCrosshairBinding = (id: string, exe: string | null) =>
+  invoke<CrosshairStore>("set_crosshair_binding", { id, exe });
+export const setCrosshairEnabled = (enabled: boolean) =>
+  invoke<boolean>("set_crosshair_enabled", { enabled });
+
+// Pixel-exact render from the same Rust renderer the overlay uses. `half` is the
+// center boundary in bitmap pixels (where the screen's center lands).
+export type CrosshairImage = { image: ImageData; half: number };
+export async function renderCrosshair(style: CrosshairStyle): Promise<CrosshairImage> {
+  const buf = await invoke<ArrayBuffer>("render_crosshair", { style });
+  const view = new DataView(buf);
+  const size = view.getUint32(0, true);
+  const half = view.getUint32(4, true);
+  const pixels = new Uint8ClampedArray(buf, 8, size * size * 4);
+  return { image: new ImageData(pixels, size, size), half };
+}
+
 // Accent palette cycled by a preset's position among non-Normal presets.
 // Normal is fixed grey; everything else pulls from a 6-hue set (see app.css).
 const ACCENT_CYCLE = [

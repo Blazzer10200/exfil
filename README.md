@@ -46,9 +46,15 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   game (**Add preset → From a running program…**), or bind/unbind from the preset's
   right-click menu or the main panel. Detection is a read-only window/process enumeration —
   no injection, no hooks.
+- **Crosshair overlay** — its own **Crosshairs** tab: build crosshairs (arms, dot, ring,
+  outline, T-style, color, offset) with a pixel-exact live preview, and EXFIL draws the
+  one you pick at the center of your primary monitor. Bind a crosshair to a game and it
+  switches in whenever that game is in front; pick **None** to show nothing outside
+  bound games. Works over borderless/windowed games (not exclusive fullscreen); the
+  overlay is click-through and never takes focus.
 - **Global hotkeys** — **Ctrl+Shift+F9** cycles through your presets, **Ctrl+Shift+F10**
-  snaps back to Normal — from inside a game, with EXFIL hidden in the tray (toggleable
-  in Settings).
+  snaps back to Normal, **Ctrl+Shift+F11** toggles the crosshair — from inside a game,
+  with EXFIL hidden in the tray (toggleable in Settings).
 - **Lives in the tray** — closing the window hides to tray; the tray menu has
   **Show / Reset display / Quit**. The active ramp is re-asserted on an interval so
   fullscreen games can't permanently steal the gamma.
@@ -65,7 +71,8 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
 EXFIL never touches game processes. Gamma goes through the Windows display driver
 (GDI), vibrance through NVIDIA's public NVAPI or AMD's public ADL, and the auto-switch
 watcher only *reads* the process list (`CreateToolhelp32Snapshot` / `EnumWindows`) — no
-DLL injection, no hooks, no memory access. This is the same class of access the NVIDIA
+DLL injection, no hooks, no memory access. The crosshair is EXFIL's own transparent
+top-most window drawn over the desktop, not something rendered inside the game. This is the same class of access the NVIDIA
 Control Panel, AMD Radeon software, and Windows itself use, which is what keeps it
 BattlEye / EAC-safe.
 
@@ -88,8 +95,9 @@ CSS · TypeScript · Tauri 2 · Rust 2021 · `windows` crate (GDI) · raw NVAPI 
 
 ## Data
 
-Presets live at `%APPDATA%\exfil-v2\presets.json` — created fresh on first run,
-per-user, nothing else is written anywhere. No telemetry, no analytics, no crash
+Presets live at `%APPDATA%\exfil-v2\presets.json` and crosshairs at
+`%APPDATA%\exfil-v2\crosshairs.json` — created fresh on first run, per-user, nothing
+else is written anywhere. No telemetry, no analytics, no crash
 reporting.
 
 ## License
