@@ -22,9 +22,11 @@ Thumbs.db
 
 # Handoff (per workspace convention — gitignored)
 HANDOFF.md
+HANDOFF-ARCHIVE-*.md
 
 # Claude Code local runtime state
 .claude/
 
 # Internal working docs — local only
 /CLAUDE.md
+/AGENTS.md
