@@ -2,6 +2,29 @@
 
 All notable changes to EXFIL. Earlier releases are described in their git tags.
 
+## [2.5.0] — 2026-09-26
+
+### Changed
+- **New "Tactical HUD" interface.** Every screen was rebuilt to the Claude Design
+  handoff: a 52px icon rail (Color · Crosshair · Games · Settings), a breadcrumb
+  titlebar, horizontal section strips instead of side rails, dial cards for the
+  color controls, and a status bar that shows the GPU vendor, what's in front, and
+  every result toast.
+- **Crosshair editor** is now a zoomable stage (1×–8×, pixel grid, 1:1 inset,
+  backdrop picker including your own screenshot) with collapsible part panels:
+  shape (Cross / X / T / Chevron / Brackets), color + glow, inner and outer lines,
+  center dot, ring, outline, position with nudge, and a **share code** you can
+  copy or paste. Valorant and CS2 codes paste straight in.
+- **Settings** is a page instead of a modal.
+
+### Added
+- **Crosshair library** — 12 starter crosshairs with a live preview, one-click
+  USE TEMPLATE, a 5-second on-screen preview, and code import.
+- **Games** page — one row per bound program showing which preset and crosshair
+  switch in, with pills to change either and a live RUNNING / IDLE status.
+- **Ctrl+Shift+F12** cycles crosshairs; the tray menu gained a CROSSHAIR ON/OFF item
+  and shows the active preset + crosshair.
+
 ## [2.4.0] — 2026-09-26
 
 ### Added

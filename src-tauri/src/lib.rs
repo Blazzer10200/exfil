@@ -34,6 +34,9 @@ struct AppState {
     /// Crosshair library + overlay switch. The overlay thread resolves what to
     /// draw from this every tick, so any saved change shows on screen live.
     crosshairs: Mutex<CrosshairStore>,
+    /// Exe basename of the foreground window (None = desktop / shell / EXFIL),
+    /// kept current by the overlay thread and mirrored to the UI as "in-front".
+    in_front: Mutex<Option<String>>,
 }
 
 /// Lock a mutex, recovering the guard on poison instead of panicking. With
@@ -340,6 +343,49 @@ fn render_crosshair(style: CrosshairStyle) -> tauri::ipc::Response {
     tauri::ipc::Response::new(out)
 }
 
+/// Foreground program right now (same value the "in-front" event carries).
+#[tauri::command]
+fn get_in_front(state: State<AppState>) -> Option<String> {
+    lock(&state.in_front).clone()
+}
+
+/// Primary monitor as the preview labels it: device name + physical size.
+#[derive(serde::Serialize)]
+struct MonitorInfo {
+    name: String,
+    width: u32,
+    height: u32,
+}
+
+#[tauri::command]
+fn primary_monitor(app: tauri::AppHandle) -> Option<MonitorInfo> {
+    let m = app.primary_monitor().ok().flatten()?;
+    let raw = m.name().cloned().unwrap_or_default();
+    // "\\.\DISPLAY1" → "DISPLAY1"
+    let name = raw.rsplit('\\').next().unwrap_or("DISPLAY1").to_string();
+    let size = m.size();
+    Some(MonitorInfo { name, width: size.width, height: size.height })
+}
+
+/// Hotkey: cycle the crosshair pick (wraps through None). "crosshair-selected"
+/// re-syncs the UI.
+fn cycle_crosshair(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let next = {
+        let mut s = lock(&state.crosshairs);
+        let next = s.next_pick();
+        if let Err(e) = s.select(&next) {
+            log::warn!("crosshair cycle failed: {e}");
+            return;
+        }
+        if let Err(e) = s.save() {
+            log::warn!("failed to persist crosshair pick: {e}");
+        }
+        next
+    };
+    let _ = app.emit("crosshair-selected", next);
+}
+
 /// Hotkey toggle for the overlay; "crosshair-toggled" re-syncs the UI.
 fn toggle_crosshair(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
@@ -370,11 +416,16 @@ fn hotkey_crosshair() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F11)
 }
 
+fn hotkey_crosshair_cycle() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::F12)
+}
+
 fn register_hotkeys(app: &tauri::AppHandle) -> Result<(), String> {
     let gs = app.global_shortcut();
     gs.register(hotkey_cycle()).map_err(|e| e.to_string())?;
     gs.register(hotkey_normal()).map_err(|e| e.to_string())?;
     gs.register(hotkey_crosshair()).map_err(|e| e.to_string())?;
+    gs.register(hotkey_crosshair_cycle()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -383,6 +434,7 @@ fn unregister_hotkeys(app: &tauri::AppHandle) {
     let _ = gs.unregister(hotkey_cycle());
     let _ = gs.unregister(hotkey_normal());
     let _ = gs.unregister(hotkey_crosshair());
+    let _ = gs.unregister(hotkey_crosshair_cycle());
 }
 
 /// The next slot in rail order after the active one (wraps; includes Normal so
@@ -558,6 +610,12 @@ fn tray_action(
             do_reset(&state);
             Ok(())
         }
+        // Same path as Ctrl+Shift+F11 — flips the overlay master switch and
+        // emits "crosshair-toggled" so every window re-syncs.
+        "crosshair" => {
+            toggle_crosshair(&app);
+            Ok(())
+        }
         "quit" => {
             // NB: native-restore on quit is handled centrally in the
             // RunEvent::Exit handler, so every exit path leaves the screen native.
@@ -584,6 +642,7 @@ pub fn run() {
         manual_active: Mutex::new(store.active.clone()),
         store: Mutex::new(store),
         crosshairs: Mutex::new(CrosshairStore::load()),
+        in_front: Mutex::new(None),
     };
 
     tauri::Builder::default()
@@ -614,6 +673,10 @@ pub fn run() {
                     }
                     if shortcut == &hotkey_crosshair() {
                         toggle_crosshair(app);
+                        return;
+                    }
+                    if shortcut == &hotkey_crosshair_cycle() {
+                        cycle_crosshair(app);
                         return;
                     }
                     let slot = if shortcut == &hotkey_cycle() {
@@ -662,6 +725,8 @@ pub fn run() {
             set_crosshair_binding,
             set_crosshair_enabled,
             render_crosshair,
+            get_in_front,
+            primary_monitor,
         ])
         .setup(|app| {
             // Start-with-Windows honors the stored preference (default on) —
@@ -813,9 +878,18 @@ pub fn run() {
             // ── Crosshair overlay ──
             // Native click-through layered window on its own thread; each tick
             // asks the store what to draw for the current foreground program.
+            // The same thread reports the foreground exe ("in-front") so the
+            // status bar + Games view can show what's running in front.
             {
                 let h = app.handle().clone();
-                overlay::start(move |fg_exe| lock(&h.state::<AppState>().crosshairs).resolve(fg_exe));
+                let f = app.handle().clone();
+                overlay::start(
+                    move |fg_exe| lock(&h.state::<AppState>().crosshairs).resolve(fg_exe),
+                    move |exe| {
+                        *lock(&f.state::<AppState>().in_front) = exe.clone();
+                        let _ = f.emit("in-front", exe);
+                    },
+                );
             }
 
             // ── Update check on boot ──

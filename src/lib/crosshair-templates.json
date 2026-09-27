@@ -1,0 +1,86 @@
+[
+  {
+    "id": "classic",
+    "name": "Classic",
+    "category": "cross",
+    "description": "Four short arms, tight gap. The default most pros start from.",
+    "code": "X1;00FF66;A100;S0;I6.2.3;O0;D0;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "dot",
+    "name": "Dot",
+    "category": "dot",
+    "description": "A single point with an outline. Minimal, zero clutter.",
+    "code": "X1;00E5FF;A100;S0;I0;O0;D3;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "t-cross",
+    "name": "T-cross",
+    "category": "cross",
+    "description": "Classic without the top arm — keeps the view above the target clear.",
+    "code": "X1;FFEE00;A100;S2;I7.2.3;O0;D0;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "circle-dot",
+    "name": "Circle dot",
+    "category": "ring",
+    "description": "A thin ring around a center dot. Reads well over busy backdrops.",
+    "code": "X1;FFFFFF;A100;S0;I0;O0;D2;R8.2;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "chevron",
+    "name": "Chevron",
+    "category": "shapes",
+    "description": "A ^ just under center — leaves the target itself unobstructed.",
+    "code": "X1;FF3DF2;A100;S3;I9.2.2;O0;D0;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "x-cross",
+    "name": "X-cross",
+    "category": "cross",
+    "description": "Diagonal arms. Popular for spray control — the center stays open.",
+    "code": "X1;FF3B3B;A100;S1;I6.2.3;O0;D0;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "brackets",
+    "name": "Brackets",
+    "category": "shapes",
+    "description": "Corner brackets framing the target with a center dot.",
+    "code": "X1;00FF66;A100;S4;I14.3.7;O0;D2;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "inner-outer",
+    "name": "Inner + outer",
+    "category": "cross",
+    "description": "Valorant-style: a tight inner cross with dimmer outer lines.",
+    "code": "X1;FFFFFF;A100;S0;I4.2.3;O3.1.13.70;D0;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "sniper",
+    "name": "Sniper",
+    "category": "cross",
+    "description": "Long hairline arms with a pinpoint dot. For scoped play.",
+    "code": "X1;FF3B3B;A100;S0;I18.1.4;O0;D1;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "shotgun",
+    "name": "Shotgun",
+    "category": "ring",
+    "description": "A wide ring approximating spread, plus a dot.",
+    "code": "X1;FFA502;A100;S0;I0;O0;D2;R14.2;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "diamond",
+    "name": "Diamond",
+    "category": "shapes",
+    "description": "Thin diagonals around a pinpoint dot — a diamond-shaped reticle.",
+    "code": "X1;00E5FF;A100;S1;I10.1.4;O0;D1;R0;L1.000000;G0;P0.0;Z0"
+  },
+  {
+    "id": "micro",
+    "name": "Micro",
+    "category": "cross",
+    "description": "The smallest usable cross: 1px arms, 1px gap.",
+    "code": "X1;FFFFFF;A100;S0;I3.1.1;O0;D0;R0;L1.000000;G0;P0.0;Z0"
+  }
+]

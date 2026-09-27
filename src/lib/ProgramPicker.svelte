@@ -1,344 +1,262 @@
 <script lang="ts">
-  // Modal "pick a program" chooser shared by preset binding/creation and
-  // crosshair binding: browse for an .exe via the OS dialog, OR pick from the
-  // live list of programs with a visible window. Hands back the lowercased exe
-  // basename (+ a display title) — callers decide what binding means.
+  // BIND PROGRAM modal: browse for an .exe, or pick a running window. Hands
+  // back the lowercased exe basename + a display title; callers decide what
+  // binding means. The list is a read-only window enumeration (no injection).
   import { onMount } from "svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import { Gamepad2, Link2, RotateCw, X } from "lucide-svelte";
+  import { FolderOpen, RotateCw, X } from "lucide-svelte";
   import { listWindowPrograms, type WindowProc } from "./api";
+  import { app } from "./state.svelte";
+  import { toast, reason } from "./toast.svelte";
 
   interface Props {
-    heading: string;
+    heading?: string;
     sub: string;
     onpick: (exe: string, title: string) => void;
     onclose: () => void;
-    onerror?: (message: string) => void;
+    /** Name of whatever this exe is already bound to (shows "→ X · will rebind"). */
+    boundTo?: (exe: string) => string | null;
   }
-  let { heading, sub, onpick, onclose, onerror }: Props = $props();
+  let { heading = "BIND PROGRAM", sub, onpick, onclose, boundTo }: Props = $props();
 
   let procs = $state<WindowProc[]>([]);
-  let procFilter = $state("");
-  let procLoading = $state(false);
+  let filter = $state("");
+  let loading = $state(true);
 
-  let filteredProcs = $derived(
-    procFilter.trim()
-      ? procs.filter((p) => {
-          const q = procFilter.trim().toLowerCase();
-          return p.title.toLowerCase().includes(q) || p.exe.includes(q);
-        })
-      : procs,
-  );
+  const filtered = $derived.by(() => {
+    const q = filter.trim().toLowerCase();
+    const list = q ? procs.filter((p) => p.title.toLowerCase().includes(q) || p.exe.includes(q)) : procs;
+    // In-front program first.
+    return [...list].sort((a, b) => Number(b.exe === app.inFront) - Number(a.exe === app.inFront));
+  });
 
-  async function loadProcs() {
-    procLoading = true;
+  async function load() {
+    loading = true;
     try {
       procs = await listWindowPrograms();
     } catch (e) {
       procs = [];
-      onerror?.(`Failed to list running programs: ${String(e)}`);
+      toast.error(`✕ WINDOW LIST FAILED · ${reason(e)}`);
     } finally {
-      procLoading = false;
+      loading = false;
     }
   }
+  onMount(load);
 
-  onMount(loadProcs);
-
-  async function browseExe() {
-    const picked = await openDialog({
-      multiple: false,
-      directory: false,
-      filters: [{ name: "Programs", extensions: ["exe"] }],
-    });
+  async function browse() {
+    const picked = await openDialog({ multiple: false, directory: false, filters: [{ name: "Programs", extensions: ["exe"] }] });
     if (typeof picked !== "string") return;
     const base = picked.split(/[\\/]/).pop()?.toLowerCase() ?? "";
     if (!base) return;
-    // No window title from a file pick — derive one from the basename.
     onpick(base, base.replace(/\.exe$/i, ""));
     onclose();
   }
-
-  function pickProc(proc: WindowProc) {
-    onpick(proc.exe, proc.title);
+  function pick(p: WindowProc) {
+    onpick(p.exe, p.title);
     onclose();
   }
-
-  function focusOnMount(node: HTMLElement) {
+  function focus(node: HTMLElement) {
     node.focus();
   }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} />
 
-<button class="menu-backdrop modal" aria-label="Close picker" onclick={onclose}></button>
-<div class="binder" role="dialog" aria-modal="true" aria-label={heading} tabindex="-1" use:focusOnMount>
-  <div class="binder-glow"></div>
-  <button class="binder-close" aria-label="Close" title="Close" onclick={onclose}>
-    <X size={14} />
-  </button>
-  <header class="binder-head">
-    <div class="binder-icon"><Gamepad2 size={18} /></div>
-    <div class="binder-head-text">
-      <span>{heading}</span>
-      <span class="binder-sub">{sub}</span>
-    </div>
-  </header>
-  <button class="browse" onclick={browseExe}>
-    <Link2 size={14} />
-    Browse for .exe…
-  </button>
-  <div class="binder-or"><span></span>or pick a running program<span></span></div>
-  <div class="proc-filter-row">
-    <input class="proc-filter" placeholder="Filter…" bind:value={procFilter} />
-    <button class="proc-refresh" title="Refresh list" aria-label="Refresh list" onclick={loadProcs}>
-      <RotateCw size={14} class={procLoading ? "spin" : ""} />
+<button class="backdrop" aria-label="Close" onclick={onclose}></button>
+<div class="dialog" role="dialog" aria-modal="true" aria-label={heading} tabindex="-1" use:focus>
+  <button class="close" aria-label="Close" onclick={onclose}><X size={14} /></button>
+  <div class="head">
+    <div class="title display">{heading}</div>
+    <div class="sub mono">{sub}</div>
+  </div>
+  <button class="chip tall browse" onclick={browse}><FolderOpen size={13} /> BROWSE FOR .EXE…</button>
+  <div class="or mono"><span></span>OR A RUNNING WINDOW<span></span></div>
+  <div class="filter-row">
+    <input class="field" placeholder="Filter windows…" bind:value={filter} />
+    <button class="chip refresh" title="Refresh" aria-label="Refresh" onclick={load}>
+      <span class:spin={loading}><RotateCw size={12} /></span>
     </button>
   </div>
-  <div class="proc-list">
-    {#each filteredProcs as proc (proc.exe)}
-      <button class="proc" onclick={() => pickProc(proc)}>
-        <span class="proc-dot"></span>
-        <span class="proc-text">
-          <span class="proc-title">{proc.title}</span>
-          <span class="proc-exe">{proc.exe}</span>
-        </span>
-      </button>
+  <div class="list">
+    {#if loading && !procs.length}
+      {#each [0, 1, 2] as i}
+        <div class="skel" style="--i: {i}"></div>
+      {/each}
     {:else}
-      <div class="proc-empty">
-        {procLoading ? "Loading…" : "No matching programs"}
-      </div>
-    {/each}
+      {#each filtered as p (p.exe)}
+        {@const bound = boundTo?.(p.exe)}
+        <button class="row" onclick={() => pick(p)}>
+          <span class="dot" class:front={p.exe === app.inFront}></span>
+          <span class="text">
+            <span class="t">{p.title}</span>
+            <span class="e mono">{p.exe}{#if bound}<span class="rebind"> → {bound.toUpperCase()} · will rebind</span>{/if}</span>
+          </span>
+        </button>
+      {:else}
+        <div class="empty mono">NO WINDOWS FOUND</div>
+      {/each}
+    {/if}
   </div>
 </div>
 
 <style>
-  .menu-backdrop.modal {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    padding: 0;
-    border: none;
-    cursor: default;
-    background:
-      radial-gradient(900px 500px at 50% 30%, color-mix(in oklab, var(--accent) 6%, transparent), transparent 60%),
-      color-mix(in oklab, #000 50%, transparent);
-    backdrop-filter: blur(2px);
-    animation: backdrop-in 140ms ease;
-  }
-  @keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
-  .binder {
+  .dialog {
     position: fixed;
     z-index: 70;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    width: 340px;
-    max-height: 70vh;
+    width: 380px;
+    max-height: 460px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 18px;
-    overflow: hidden;
-    background:
-      radial-gradient(180px 120px at 16% -10%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%),
-      linear-gradient(180deg, var(--bg-elev-3) 0%, var(--bg-elev-2) 100%);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-xl, 14px);
-    box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 6%, transparent);
-    animation: binder-in 180ms var(--ease-soft);
+    gap: 10px;
+    padding: 14px;
+    background: oklch(0.14 0.004 250);
+    border: 1px solid var(--hud-line-5);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--hud-r);
+    box-shadow: 0 30px 70px oklch(0 0 0 / 0.7);
+    animation: hud-pop 220ms var(--ease-hud);
+    outline: none;
   }
-  .binder:focus { outline: none; }
-  @keyframes binder-in {
-    from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
-    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-  }
-  .binder-glow {
+  .close {
     position: absolute;
-    inset: 0;
-    pointer-events: none;
-    box-shadow: inset 0 0 60px color-mix(in oklab, var(--accent) 5%, transparent);
-  }
-  .binder-close {
-    position: absolute;
-    top: 10px;
-    right: 10px;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
-    border: none;
-    border-radius: var(--radius-sm);
+    border: 0;
+    border-radius: var(--hud-r);
     background: transparent;
-    color: var(--fg-muted);
+    color: var(--hud-fg-dim);
     cursor: pointer;
-    transition: background 100ms ease, color 100ms ease;
   }
-  .binder-close:hover { background: var(--surface-hover); color: var(--fg); }
-  .binder-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
+  .close:hover {
+    background: var(--hud-hover);
+    color: var(--hud-fg);
   }
-  .binder-icon {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: var(--radius);
-    background: linear-gradient(155deg, color-mix(in oklab, var(--accent) 22%, transparent), color-mix(in oklab, var(--accent) 8%, transparent));
-    border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
-    color: var(--accent);
-    box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 25%, transparent);
+  .title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--hud-fg-hi);
   }
-  .binder-head-text { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
-  .binder-head-text > span:first-child { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
-  .binder-sub { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.4; }
+  .sub {
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--hud-fg-low);
+  }
   .browse {
-    display: flex;
-    align-items: center;
+    width: 100%;
     justify-content: center;
-    gap: 7px;
-    padding: 10px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border-strong);
-    background: linear-gradient(180deg, var(--surface-hover), var(--field));
-    color: var(--fg-2);
-    font: inherit;
-    font-size: var(--fs-sm);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 100ms ease, color 100ms ease, border-color 100ms ease, box-shadow 120ms ease, transform 80ms ease;
   }
-  .browse:hover {
-    background: linear-gradient(180deg, var(--surface-active), var(--surface-hover));
-    color: var(--fg);
-    border-color: color-mix(in oklab, var(--accent) 40%, var(--border-strong));
-    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent);
-  }
-  .browse:active { transform: translateY(1px); }
-  .binder-or {
+  .or {
     display: flex;
     align-items: center;
-    gap: 8px;
-    text-align: center;
-    font-size: var(--fs-xs);
-    color: var(--fg-subtle);
+    gap: 10px;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--hud-fg-faint);
   }
-  .binder-or > span {
+  .or span {
     flex: 1;
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+    background: var(--hud-line-2);
   }
-  .proc-filter-row {
+  .filter-row {
     display: flex;
     gap: 6px;
-    align-items: stretch;
   }
-  .proc-filter {
+  .filter-row .field {
     flex: 1;
-    min-width: 0;
-    padding: 8px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--field);
-    color: var(--fg);
-    font: inherit;
-    font-size: var(--fs-sm);
-    outline: none;
-    transition: border-color 100ms ease, box-shadow 100ms ease;
+    height: 28px;
   }
-  .proc-filter:focus { border-color: var(--border-focus); box-shadow: 0 0 0 2px var(--ring); }
-  .proc-refresh {
-    display: flex;
-    align-items: center;
+  .refresh {
+    width: 28px;
+    height: 28px;
+    padding: 0;
     justify-content: center;
-    flex-shrink: 0;
-    width: 33px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
-    background: var(--field);
-    color: var(--fg-2);
-    cursor: pointer;
-    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
   }
-  .proc-refresh:hover { background: var(--surface-hover); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 35%, var(--border-strong)); }
-  .proc-refresh :global(.spin) { animation: proc-spin 700ms linear infinite; }
-  @keyframes proc-spin { to { transform: rotate(360deg); } }
-  .proc-list {
+  .spin {
+    display: inline-flex;
+    animation: hud-spin 800ms linear infinite;
+  }
+  .list {
+    flex: 1;
+    min-height: 120px;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    overflow-y: auto;
-    min-height: 0;
-    flex: 1;
+    gap: 2px;
+    margin: 0 -4px;
+    padding: 0 4px;
   }
-  .proc {
+  .row {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 7px 9px;
-    border-radius: var(--radius-sm);
-    border: 1px solid transparent;
+    gap: 10px;
+    padding: 7px 8px;
+    border: 0;
+    border-radius: var(--hud-r);
     background: transparent;
-    color: var(--fg-2);
-    font: inherit;
+    color: var(--hud-fg);
     text-align: left;
     cursor: pointer;
-    overflow: hidden;
-    transition: background 120ms ease, border-color 120ms ease, transform 80ms ease;
+    transition: background 120ms var(--ease-hud), transform 120ms var(--ease-hud);
   }
-  .proc:hover {
-    background: var(--surface-hover);
-    border-color: var(--border);
-    color: var(--fg);
-    transform: translateX(1px);
+  .row:hover {
+    background: var(--hud-hover);
+    transform: translateX(2px);
   }
-  .proc-dot {
-    flex-shrink: 0;
+  .dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--fg-faint);
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--fg-faint) 12%, transparent);
-    transition: background 120ms ease, box-shadow 120ms ease;
+    background: var(--hud-fg-faint);
+    flex: 0 0 6px;
   }
-  .proc:hover .proc-dot {
-    background: var(--accent);
-    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  .dot.front {
+    background: var(--ok);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--ok) 70%, transparent);
   }
-  .proc-text {
+  .text {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: 2px;
     min-width: 0;
   }
-  .proc-title {
-    font-size: var(--fs-sm);
+  .t {
+    font-size: 12px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .proc-exe {
-    font-size: var(--fs-xs);
-    color: var(--fg-subtle);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .e {
+    font-size: 10px;
+    color: var(--hud-fg-low);
   }
-  .proc-empty {
-    padding: 14px;
+  .rebind {
+    color: var(--accent);
+  }
+  .skel {
+    height: 34px;
+    border-radius: var(--hud-r);
+    background: linear-gradient(90deg, var(--hud-panel) 25%, var(--hud-hover) 50%, var(--hud-panel) 75%);
+    background-size: 200% 100%;
+    animation: hud-shimmer 1.2s linear infinite;
+    animation-delay: calc(var(--i) * 120ms);
+  }
+  .empty {
+    margin: 8px 0;
+    padding: 18px;
+    border: 1px dashed var(--hud-line-4);
+    border-radius: var(--hud-r);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--hud-fg-faint);
     text-align: center;
-    font-size: var(--fs-xs);
-    color: var(--fg-subtle);
-  }
-  .proc:focus-visible,
-  .browse:focus-visible,
-  .proc-refresh:focus-visible,
-  .proc-filter:focus-visible,
-  .binder-close:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--ring);
   }
 </style>

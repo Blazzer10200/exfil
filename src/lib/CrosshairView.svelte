@@ -1,1003 +1,550 @@
 <script lang="ts">
-  // Crosshairs tab: own list of crosshair designs + an editor. The preview is
-  // drawn from the SAME Rust renderer the on-screen overlay uses, on a
-  // device-pixel canvas, so 1× here is pixel-for-pixel what the overlay draws.
-  import { onMount, untrack } from "svelte";
-  import { slide } from "svelte/transition";
-  import { listen } from "@tauri-apps/api/event";
-  import {
-    Copy,
-    Gamepad2,
-    Keyboard,
-    CheckCircle2,
-    XCircle,
-    Palette,
-    Crosshair as CrossIcon,
-    CircleDot,
-    Circle,
-    Square,
-    Move,
-    CircleOff,
-  } from "lucide-svelte";
-  import Slider from "./Slider.svelte";
-  import CrosshairRail from "./CrosshairRail.svelte";
-  import {
-    NO_CROSSHAIR,
-    getCrosshairs,
-    createCrosshair,
-    updateCrosshair,
-    renameCrosshair,
-    deleteCrosshair,
-    selectCrosshair,
-    setCrosshairBinding,
-    setCrosshairEnabled,
-    renderCrosshair,
-    type CrosshairStore,
-    type CrosshairStyle,
-    type CrosshairImage,
-  } from "./api";
+  // CROSSHAIR: strip (None · Library · crosshairs · + NEW · overlay toggle),
+  // zoomable stage, part panels, share code.
+  import { onMount } from "svelte";
+  import { ChevronDown, CircleOff, LayoutGrid, Pencil, Copy, Trash2, Link2, Plus, Image } from "lucide-svelte";
+  import { DEFAULT_STYLE, NO_CROSSHAIR, SHAPES, renderCrosshair, type CrosshairStyle } from "./api";
+  import { app } from "./state.svelte";
+  import { toast } from "./toast.svelte";
+  import { prefs, savePrefs, type Backdrop } from "./prefs";
+  import { encode, decode } from "./xhair-code";
+  import { paintStage, thumbUrl, toBitmap, type Bitmap } from "./xhair-canvas";
+  import Strip, { type StripItem } from "./Strip.svelte";
+  import XPanel from "./XPanel.svelte";
+  import SliderRow from "./SliderRow.svelte";
+  import InlineRename from "./InlineRename.svelte";
+  import ArmChip from "./ArmChip.svelte";
+  import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
+  import ProgramPicker from "./ProgramPicker.svelte";
+  import LibraryView from "./LibraryView.svelte";
 
-  const PREVIEW = 200; // CSS px, main stage
-  const INSET = 64; // CSS px, actual-size inset
-  const THUMB = 30; // CSS px, rail + per-game list thumbnails
+  const SWATCHES = ["#00ff66", "#00e5ff", "#ffee00", "#ff3df2", "#ff3b3b", "#ffffff"];
   const ZOOMS = [1, 2, 4, 8];
-  const COLORS = ["#00ff66", "#00e5ff", "#ffee00", "#ff3df2", "#ff3b3b", "#ffffff"];
-  const OUTLINE_COLORS = ["#000000", "#ffffff"];
-  const SLIDE = { duration: 170 };
-  type Part = "arms" | "t_style" | "dot" | "ring" | "outline";
+  const BACKDROPS: { id: Backdrop; label: string }[] = [
+    { id: "scene", label: "Scene" },
+    { id: "bright", label: "Bright" },
+    { id: "dark", label: "Dark" },
+    { id: "noise", label: "Noise" },
+  ];
 
-  let store = $state<CrosshairStore | null>(null);
-  // Editable copy of the selected crosshair's style; saved back debounced.
-  let style = $state<CrosshairStyle | null>(null);
+  // ── strip ──
   let thumbs = $state<Record<string, string>>({});
-  let zoom = $state(4);
-  let canvas = $state<HTMLCanvasElement>();
-  let inset = $state<HTMLCanvasElement>();
-  // Rail instance — exposes openBindFor so the hero "Bind…" link opens the
-  // same picker the rail's right-click menu uses.
-  let rail = $state<{ openBindFor: (id: string) => void } | undefined>();
-  let editing = $state(false);
-  let draft = $state("");
-  let toast = $state<{ msg: string; kind: "ok" | "err" } | null>(null);
-
-  const current = $derived(store?.crosshairs.find((c) => c.id === store?.selected));
-  const boundOnes = $derived(store?.crosshairs.filter((c) => c.exe) ?? []);
-  const key = $derived(style ? JSON.stringify(style) : "");
-  const empty = $derived(!!style && !style.arms && !style.dot && !style.ring);
-  const nudged = $derived(!!style && (style.offset_x !== 0 || style.offset_y !== 0));
-
-  let toastTimer: ReturnType<typeof setTimeout> | undefined;
-  function flash(msg: string, kind: "ok" | "err" = "ok") {
-    toast = { msg, kind };
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => (toast = null), 2200);
-  }
-
-  function loadStyle() {
-    style = current ? $state.snapshot(current.style) : null;
-  }
-
-  // ── Rendering ──
-  let scratch: HTMLCanvasElement | undefined;
-  function toCanvas(img: ImageData) {
-    scratch ??= document.createElement("canvas");
-    scratch.width = img.width;
-    scratch.height = img.height;
-    scratch.getContext("2d")?.putImageData(img, 0, 0);
-    return scratch;
-  }
-
-  // Thumbnail = the crosshair fitted to a THUMB-sized device-pixel canvas:
-  // small ones get a crisp integer upscale, big ones a smooth downscale
-  // (pixelated downscaling drops whole lines).
-  function thumbUrl({ image, half }: CrosshairImage) {
-    let r = 1; // farthest drawn pixel edge from the center boundary
-    const d = image.data;
-    for (let y = 0; y < image.height; y++)
-      for (let x = 0; x < image.width; x++)
-        if (d[(y * image.width + x) * 4 + 3]) r = Math.max(r, x + 1 - half, half - x, y + 1 - half, half - y);
-    const px = Math.round(THUMB * (window.devicePixelRatio || 1));
-    const fit = (px * 0.36) / r; // content spans ~72% of the box
-    const z = fit >= 1 ? Math.min(3, Math.floor(fit)) : fit;
-    const cv = document.createElement("canvas");
-    cv.width = px;
-    cv.height = px;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return "";
-    ctx.imageSmoothingEnabled = z < 1;
-    ctx.imageSmoothingQuality = "high";
-    const mid = Math.floor(px / 2);
-    ctx.drawImage(toCanvas(image), mid - half * z, mid - half * z, image.width * z, image.height * z);
-    return cv.toDataURL();
-  }
-
-  async function refreshThumb(id: string, s: CrosshairStyle) {
-    try {
-      const ci = await renderCrosshair(s);
-      thumbs[id] = thumbUrl(ci);
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  // Draw `ci` into a device-pixel-sized canvas at integer zoom `z`. The bitmap's
-  // center boundary (`half`) lands exactly on the canvas's center boundary.
-  function paint(cv: HTMLCanvasElement | undefined, css: number, z: number, ci: CrosshairImage, s: CrosshairStyle) {
-    const ctx = cv?.getContext("2d");
-    if (!cv || !ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const px = Math.round(css * dpr);
-    if (cv.width !== px) {
-      cv.width = px;
-      cv.height = px;
-    }
-    ctx.clearRect(0, 0, px, px);
-    const mid = Math.floor(px / 2);
-    // Pixel grid on the zoomed view — lines sit on bitmap pixel boundaries.
-    if (z >= 4) {
-      ctx.fillStyle = "rgba(255,255,255,0.07)";
-      for (let x = mid % z; x < px; x += z) ctx.fillRect(x, 0, 1, px);
-      for (let y = mid % z; y < px; y += z) ctx.fillRect(0, y, px, 1);
-    }
-    // Edge ticks straddle the exact center boundary (columns mid-1 | mid).
-    const t = Math.max(4, Math.round(css * 0.05 * dpr));
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    ctx.fillRect(mid - 1, 0, 2, t);
-    ctx.fillRect(mid - 1, px - t, 2, t);
-    ctx.fillRect(0, mid - 1, t, 2);
-    ctx.fillRect(px - t, mid - 1, t, 2);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(
-      toCanvas(ci.image),
-      mid + (s.offset_x - ci.half) * z,
-      mid + (s.offset_y - ci.half) * z,
-      ci.image.width * z,
-      ci.image.height * z,
-    );
-  }
-
-  // Coalesced render loop: at most one IPC in flight; slider drags that outrun
-  // it collapse to the newest style. Zoom-only changes reuse the last bitmap.
-  let want: { key: string; z: number; id: string | undefined } | null = null;
-  let rendering = false;
-  let last: { key: string; ci: CrosshairImage } | null = null;
+  const thumbKeys = new Map<string, string>();
   let thumbTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    const list = app.crosshairs.map((c) => ({ id: c.id, style: $state.snapshot(c.style) }));
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(async () => {
+      for (const { id, style } of list) {
+        if (id === NO_CROSSHAIR) continue;
+        const key = JSON.stringify(style);
+        if (thumbKeys.get(id) === key) continue;
+        thumbKeys.set(id, key);
+        try {
+          thumbs[id] = thumbUrl(toBitmap(await renderCrosshair(style)), 14);
+        } catch {
+          // thumb stays stale; the stage will surface any render error
+        }
+      }
+    }, 200);
+  });
+  const items = $derived.by((): StripItem[] => [
+    { id: NO_CROSSHAIR, label: "NONE", icon: CircleOff },
+    { id: "__library", label: "LIBRARY", icon: LayoutGrid },
+    ...app.crosshairs
+      .filter((c) => c.id !== NO_CROSSHAIR)
+      .map((c) => ({ id: c.id, label: c.name, thumb: thumbs[c.id], bound: !!c.exe })),
+  ]);
 
+  let newOpen = $state(false);
+  let renaming = $state(false);
+  let picker = $state<null | "create" | "bind">(null);
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const sel = $derived(app.selectedCrosshair);
+  const isNone = $derived(app.selected === NO_CROSSHAIR || !sel);
+  const userCount = $derived(app.crosshairs.filter((c) => c.id !== NO_CROSSHAIR).length);
+
+  const inLibrary = $derived(app.view === "library");
+  const stripActive = $derived(inLibrary ? "__library" : app.selected);
+  function onselect(id: string) {
+    if (id === "__library") return app.setView("library");
+    if (inLibrary) app.setView("crosshair");
+    void app.pickCrosshair(id);
+  }
+  function openMenu(id: string, e: MouseEvent) {
+    const c = app.crosshairs.find((x) => x.id === id);
+    if (!c || id === NO_CROSSHAIR || id === "__library") return;
+    menu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: [
+        { label: "Rename", icon: Pencil, run: () => void app.pickCrosshair(id).then(() => (renaming = true)) },
+        { label: c.exe ? "Unbind program" : "Bind to program…", icon: Link2, run: () => {
+          if (c.exe) void app.bindCrosshair(id, null);
+          else void app.pickCrosshair(id).then(() => (picker = "bind"));
+        } },
+        { label: "Duplicate", icon: Copy, run: () => void app.duplicateCrosshair(id) },
+        { sep: true, label: "" },
+        { label: "Delete", icon: Trash2, danger: true, disabled: userCount <= 1, run: () => void app.deleteCrosshair(id) },
+      ],
+    };
+  }
+  async function createBlank() {
+    await app.createCrosshair(`Crosshair ${userCount + 1}`, null);
+  }
+  async function pasteCode(intoCurrent: boolean) {
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      toast.error("✕ CLIPBOARD UNAVAILABLE");
+      return;
+    }
+    const d = decode(text);
+    if (!d) {
+      toast.error("✕ INVALID CODE · expected EXFIL, Valorant or CS2 format");
+      return;
+    }
+    if (intoCurrent && sel && !isNone) {
+      style = d.style;
+      commit();
+    } else {
+      await app.createCrosshair(`${d.source.toUpperCase()} import`, d.style);
+    }
+    toast.ok(`✓ CODE IMPORTED · ${d.source.toUpperCase()}`);
+  }
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(code);
+      toast.ok("✓ CODE COPIED");
+    } catch {
+      toast.error("✕ CLIPBOARD UNAVAILABLE");
+    }
+  }
+  const boundTo = (exe: string) => app.crosshairs.find((c) => c.exe === exe)?.name ?? null;
+
+  // ── editing ──
+  // svelte-ignore state_referenced_locally
+  let style = $state<CrosshairStyle>({ ...(app.selectedCrosshair?.style ?? DEFAULT_STYLE) });
+  let loadedFor = "";
+  $effect(() => {
+    const c = app.selectedCrosshair;
+    if (!c) return;
+    if (c.id !== loadedFor) {
+      loadedFor = c.id;
+      style = { ...$state.snapshot(c.style) };
+    }
+  });
+  function commit() {
+    if (!sel || isNone) return;
+    app.editCrosshair(sel.id, $state.snapshot(style));
+  }
+  function set<K extends keyof CrosshairStyle>(k: K, v: CrosshairStyle[K]) {
+    style[k] = v;
+    commit();
+  }
+  const code = $derived(isNone ? "" : encode(style));
+  const validHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s);
+
+  // ── rendering (coalesced: one IPC in flight, newest style wins) ──
+  let bmp = $state<Bitmap | null>(null);
+  let rendering = false;
+  let pendingRender = false;
   async function renderLoop() {
-    if (rendering) return;
+    if (rendering) {
+      pendingRender = true;
+      return;
+    }
     rendering = true;
     try {
-      while (want) {
-        const job = want;
-        want = null;
-        const snap: CrosshairStyle = JSON.parse(job.key);
-        const ci = last?.key === job.key ? last.ci : await renderCrosshair(snap);
-        last = { key: job.key, ci };
-        if (want) continue; // a newer request arrived mid-flight
-        paint(canvas, PREVIEW, job.z, ci, snap);
-        paint(inset, INSET, 1, ci, snap);
-        const id = job.id;
-        clearTimeout(thumbTimer);
-        thumbTimer = setTimeout(() => {
-          if (id) thumbs[id] = thumbUrl(ci);
-        }, 200);
-      }
+      do {
+        pendingRender = false;
+        if (isNone) {
+          bmp = null;
+          break;
+        }
+        bmp = toBitmap(await renderCrosshair($state.snapshot(style)));
+      } while (pendingRender);
     } catch (e) {
-      flash(String(e), "err");
+      toast.error(`✕ RENDER · ${String(e).slice(0, 60)}`);
     } finally {
       rendering = false;
     }
   }
-
   $effect(() => {
-    if (!key || !canvas) return;
-    inset; // repaint once the inset canvas mounts
-    want = { key, z: zoom, id: untrack(() => current?.id) };
-    renderLoop();
+    void JSON.stringify(style);
+    void isNone;
+    void renderLoop();
   });
 
-  // ── Debounced save ──
-  let saveTimer: ReturnType<typeof setTimeout> | undefined;
-  let pending: { id: string; snap: CrosshairStyle } | null = null;
-  async function flushSave() {
-    clearTimeout(saveTimer);
-    const p = pending;
-    pending = null;
-    if (p) await updateCrosshair(p.id, p.snap);
-  }
-
-  $effect(() => {
-    const k = key;
-    const c = untrack(() => current);
-    if (!k || !c || k === JSON.stringify(c.style)) return;
-    const snap: CrosshairStyle = JSON.parse(k);
-    // Optimistic: the local store copy tracks edits so re-selecting shows them.
-    c.style = snap;
-    pending = { id: c.id, snap };
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => flushSave().catch((e) => flash(String(e), "err")), 150);
-  });
-
+  // ── stage ──
+  let zoom = $state(ZOOMS.includes(prefs.zoom) ? prefs.zoom : 4);
+  let backdrop = $state<Backdrop>(prefs.backdrop);
+  let backdropImage = $state<string | null>(prefs.backdropImage);
+  let stageEl = $state<HTMLDivElement>();
+  let cv = $state<HTMLCanvasElement>();
+  let inset = $state<HTMLCanvasElement>();
+  let size = $state({ w: 0, h: 0 });
   onMount(() => {
-    let dead = false;
-    let unlisten: (() => void) | undefined;
-    (async () => {
-      try {
-        store = await getCrosshairs();
-        loadStyle();
-        for (const c of store.crosshairs) refreshThumb(c.id, $state.snapshot(c.style));
-      } catch (e) {
-        flash(String(e), "err");
-      }
-      // Ctrl+Shift+F11 flips the overlay backend-side; mirror it here.
-      const un = await listen<boolean>("crosshair-toggled", (e) => {
-        if (store) store.enabled = e.payload;
-        flash(e.payload ? "Crosshair overlay on" : "Crosshair overlay off");
-      });
-      if (dead) un();
-      else unlisten = un;
-    })();
-    return () => {
-      dead = true;
-      unlisten?.();
-    };
+    const ro = new ResizeObserver(([e]) => {
+      size = { w: e.contentRect.width, h: e.contentRect.height };
+    });
+    if (stageEl) ro.observe(stageEl);
+    return () => ro.disconnect();
   });
-
-  // ── Actions ──
-  async function pick(id: string) {
-    if (!store || id === store.selected) return;
+  $effect(() => {
+    if (!cv) return;
+    paintStage(cv, bmp, { cssW: size.w, cssH: size.h, zoom, grid: true, ticks: true, dx: style.offset_x, dy: style.offset_y });
+  });
+  $effect(() => {
+    if (!inset) return;
+    paintStage(inset, bmp, { cssW: 72, cssH: 72, zoom: 1 });
+  });
+  function setZoom(z: number) {
+    zoom = z;
+    prefs.zoom = z;
+    savePrefs();
+  }
+  function setBackdrop(b: Backdrop) {
+    backdrop = b;
+    prefs.backdrop = b;
+    savePrefs();
+  }
+  let fileEl = $state<HTMLInputElement>();
+  async function onScreenshotFile(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
     try {
-      await selectCrosshair(id);
-      store.selected = id;
-      editing = false;
-      loadStyle();
-    } catch (e) {
-      flash(String(e), "err");
+      const url = URL.createObjectURL(file);
+      const img = new window.Image();
+      await new Promise<void>((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error("decode"));
+        img.src = url;
+      });
+      const k = Math.min(1, 1600 / img.width);
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k);
+      c.height = Math.round(img.height * k);
+      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      backdropImage = c.toDataURL("image/jpeg", 0.85);
+      prefs.backdropImage = backdropImage;
+      setBackdrop("custom");
+    } catch {
+      toast.error("✕ SCREENSHOT · couldn't read that image");
     }
   }
-
-  // Create (blank, or a copy of `from`) and select it — the backend selects
-  // the new one too.
-  async function create(from: string | null) {
-    if (!store) return null;
-    await flushSave();
-    const src = from ? store.crosshairs.find((c) => c.id === from) : undefined;
-    const c = await createCrosshair(src ? `${src.name} copy` : "", src ? $state.snapshot(src.style) : null);
-    store.crosshairs.push(c);
-    store.selected = c.id;
-    loadStyle();
-    refreshThumb(c.id, c.style);
-    return c;
-  }
-
-  async function onNew(from: string | null) {
-    try {
-      const c = await create(from);
-      if (c) flash(`Created ${c.name}`);
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  // New crosshair straight from a running game: named after its window
-  // title, bound to its exe (mirrors the preset rail's "From a running program").
-  async function onCreateFromGame(exe: string, title: string) {
-    try {
-      const c = await create(null);
-      if (!c) return;
-      const name = title.trim() || exe;
-      if (name !== c.name) await renameCrosshair(c.id, name);
-      store = await setCrosshairBinding(c.id, exe);
-      loadStyle();
-      flash(`Created ${name} · bound ${exe}`);
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  function startRename() {
-    if (!current) return;
-    draft = current.name;
-    editing = true;
-  }
-  async function commitRename() {
-    if (!editing || !current) return;
-    editing = false;
-    const name = draft.trim();
-    if (!name || name === current.name) return;
-    try {
-      await renameCrosshair(current.id, name);
-      current.name = name;
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-  function onRenameKey(e: KeyboardEvent) {
-    if (e.key === "Enter") commitRename();
-    else if (e.key === "Escape") editing = false;
-  }
-
-  async function onRename(id: string, name: string) {
-    const c = store?.crosshairs.find((x) => x.id === id);
-    try {
-      await renameCrosshair(id, name);
-      if (c) c.name = name;
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  // Deleting the picked crosshair falls back to None (like colors → Normal);
-  // deleting any other one leaves the pick alone.
-  async function onDelete(id: string) {
-    if (!store || store.crosshairs.length <= 1) return;
-    const name = store.crosshairs.find((c) => c.id === id)?.name ?? "crosshair";
-    try {
-      await flushSave();
-      store = await deleteCrosshair(id);
-      editing = false;
-      loadStyle();
-      flash(`Deleted ${name}`);
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  async function bind(id: string, exe: string | null) {
-    try {
-      await flushSave();
-      store = await setCrosshairBinding(id, exe);
-      loadStyle();
-      flash(exe ? `Bound ${exe}` : "Unbound");
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  async function toggleOverlay() {
-    if (!store) return;
-    try {
-      store.enabled = await setCrosshairEnabled(!store.enabled);
-    } catch (e) {
-      flash(String(e), "err");
-    }
-  }
-
-  function toggle(k: Part) {
-    if (style) style[k] = !style[k];
-  }
-  function setColor(c: string) {
-    if (style) style.color = c;
-  }
-  function setOutlineColor(c: string) {
-    if (style) style.outline_color = c;
-  }
-  function resetNudge() {
-    if (style) {
-      style.offset_x = 0;
-      style.offset_y = 0;
-    }
-  }
-
-  const px = (v: number) => `${v}px`;
-  const signed = (v: number) => `${v > 0 ? "+" : ""}${v}px`;
+  const monitorLabel = $derived(app.monitor ? `${app.monitor.name} · ${app.monitor.width}×${app.monitor.height}` : "PRIMARY");
+  const bound = $derived(app.crosshairs.filter((c) => c.id !== NO_CROSSHAIR && c.exe));
 </script>
 
-{#snippet partSwitch(on: boolean, label: string, part: Part)}
-  <button class="mini-switch" class:on role="switch" aria-checked={on} aria-label={label} onclick={() => toggle(part)}>
-    <span class="knob"></span>
-  </button>
-{/snippet}
-
-<div class="xview">
-  <CrosshairRail
-    bind:this={rail}
-    crosshairs={store?.crosshairs ?? []}
-    selected={store?.selected ?? NO_CROSSHAIR}
-    {thumbs}
-    onselect={pick}
-    oncreate={() => onNew(null)}
-    oncreategame={onCreateFromGame}
-    onduplicate={onNew}
-    ondelete={onDelete}
-    onrename={onRename}
-    onbind={bind}
-    onerror={(m) => flash(m, "err")}
-  />
-
-  <main class="panel">
-    {#if store && store.selected === NO_CROSSHAIR}
-      <header class="hero">
-        <div class="hero-text">
-          <h1>None</h1>
-          <p class="sub">
-            <CircleOff size={13} />
-            <span>No crosshair outside bound games</span>
-          </p>
+<Strip {items} active={stripActive} {onselect} oncontext={openMenu} ondblclick={(id) => id === app.selected && !isNone && (renaming = true)}>
+  {#snippet pin()}
+    <div class="new-wrap">
+      <button class="new display" onclick={() => (newOpen = !newOpen)}>+ NEW <ChevronDown size={12} /></button>
+      {#if newOpen}
+        <button class="backdrop clear" aria-label="Close" onclick={() => (newOpen = false)}></button>
+        <div class="menu new-menu" role="menu">
+          <button class="menu-item" role="menuitem" onclick={() => { newOpen = false; void createBlank(); }}>Blank</button>
+          <button class="menu-item" role="menuitem" onclick={() => { newOpen = false; app.setView("library"); }}>From library</button>
+          <button class="menu-item" role="menuitem" onclick={() => { newOpen = false; void pasteCode(false); }}>Paste code</button>
+          <button class="menu-item" role="menuitem" onclick={() => { newOpen = false; picker = "create"; }}>From running program…</button>
         </div>
-        <div class="hero-actions">
-          {@render overlaySwitch(store.enabled)}
-        </div>
-      </header>
+      {/if}
+    </div>
+  {/snippet}
+  {#snippet right()}
+    <button class="ov display" class:on={app.overlayOn} onclick={() => void app.setOverlay(!app.overlayOn)}>
+      OVERLAY <span class="ov-state mono">{app.overlayOn ? "ON" : "OFF"}</span>
+      <span class="toggle" class:on={app.overlayOn}></span>
+    </button>
+  {/snippet}
+</Strip>
 
-      <section class="card games">
-        <div class="games-head">
-          <span class="sec-title"><Gamepad2 size={14} /> Per-game crosshairs</span>
-          <span class="games-note">Switch in while their game is the window in front</span>
-        </div>
-        {#each boundOnes as c (c.id)}
-          <button class="game-row" onclick={() => pick(c.id)} title="Edit {c.name}">
-            <span class="game-thumb">
-              {#if thumbs[c.id]}<img src={thumbs[c.id]} alt="" />{/if}
-            </span>
-            <span class="game-name">{c.name}</span>
-            <span class="game-exe mono">{c.exe}</span>
-          </button>
-        {:else}
-          <p class="games-empty">
-            No games bound yet. Right-click a crosshair → <strong>Bind to game…</strong>, or
-            <strong>Add crosshair → From a running game…</strong>
-          </p>
+{#if inLibrary}
+  <LibraryView />
+{:else}
+<div class="body" class:grid={app.grid}>
+  <section class="stage-col">
+    <div class="stage bd-{backdrop}" bind:this={stageEl} style={backdrop === "custom" && backdropImage ? `background-image: url(${backdropImage})` : ""}>
+      <canvas class="cv" bind:this={cv}></canvas>
+      {#if isNone}
+        <span class="none-pill mono">NO CROSSHAIR · OVERLAY IDLE</span>
+      {/if}
+      <span class="tag mono tl">{zoom === 1 ? "1:1 · ACTUAL SIZE" : `${zoom}× · GRID = SCREEN PX`}</span>
+      <span class="tag mono tr cyan" title="Primary monitor only">{monitorLabel} ▾</span>
+      {#if zoom > 1 && !isNone}
+        <div class="inset"><canvas bind:this={inset} style="width:72px;height:72px"></canvas><span class="mono">1:1</span></div>
+      {/if}
+      <div class="zoom">
+        {#each ZOOMS as z}
+          <button class="zc mono" class:on={z === zoom} onclick={() => setZoom(z)}>{z}×</button>
         {/each}
-      </section>
+      </div>
+      <div class="picker">
+        {#each BACKDROPS as b (b.id)}
+          <button class="bp bd-{b.id}" class:on={backdrop === b.id} title={b.label} aria-label={b.label} onclick={() => setBackdrop(b.id)}></button>
+        {/each}
+        {#if backdropImage}
+          <button class="bp bd-custom" class:on={backdrop === "custom"} title="Your screenshot" aria-label="Your screenshot" style="background-image: url({backdropImage})" onclick={() => setBackdrop("custom")}></button>
+        {/if}
+        <input class="hidden-file" type="file" accept="image/png,image/jpeg,image/webp" bind:this={fileEl} onchange={onScreenshotFile} />
+        <button class="bp add" title="Use a screenshot…" aria-label="Use a screenshot" onclick={() => fileEl?.click()}>
+          {#if backdropImage}<Image size={11} />{:else}<Plus size={11} />{/if}
+        </button>
+      </div>
+    </div>
+  </section>
 
-      <footer class="foot">
-        {@render hotkeyHint(store.enabled)}
-        <div class="spacer"></div>
-        {@render toastChip()}
-      </footer>
-    {:else if store && current && style}
-      <header class="hero">
-        <div class="hero-text">
-          {#if editing}
-            <!-- svelte-ignore a11y_autofocus -->
-            <input class="rename" bind:value={draft} onblur={commitRename} onkeydown={onRenameKey} autofocus />
-          {:else}
-            <h1>
-              <button class="title" ondblclick={startRename} title="Double-click to rename">{current.name}</button>
-            </h1>
-          {/if}
-          <p class="sub">
-            <Gamepad2 size={13} />
-            {#if current.exe}
-              <span>Switches in while <strong>{current.exe}</strong> is in front</span>
-              <button class="link" onclick={() => bind(current.id, null)}>Unbind</button>
-            {:else}
-              <span>Not bound to a game</span>
-              <button class="link" onclick={() => rail?.openBindFor(current.id)}>Bind…</button>
-            {/if}
-          </p>
+  <section class="side">
+    {#if isNone}
+      <div class="actions"><span class="sec display">NONE · NOTHING OUTSIDE BOUND GAMES</span></div>
+      {#if bound.length}
+        <div class="bound-list">
+          {#each bound as c (c.id)}
+            <button class="bound-row panel" onclick={() => void app.pickCrosshair(c.id)}>
+              {#if thumbs[c.id]}<img src={thumbs[c.id]} alt="" />{/if}
+              <span class="display bn">{c.name}</span>
+              <span class="mono be">· {c.exe}</span>
+            </button>
+          {/each}
         </div>
-        <div class="hero-actions">
-          <button class="icon-btn" title="Duplicate" aria-label="Duplicate" onclick={() => onNew(current.id)}>
-            <Copy size={14} />
-          </button>
-          {@render overlaySwitch(store.enabled)}
+      {:else}
+        <div class="empty">
+          <span class="display et">NO CROSSHAIRS</span>
+          <span class="mono ed">pick a starter from the library, start blank, or paste a code</span>
+          <button class="chip lg accent" onclick={() => app.setView("library")}>OPEN LIBRARY</button>
+          <button class="chip lg" onclick={createBlank}>BLANK CROSSHAIR</button>
+          <button class="chip lg" onclick={() => void pasteCode(false)}>PASTE A CODE</button>
         </div>
-      </header>
+      {/if}
+    {:else if sel}
+      <div class="actions">
+        {#if renaming}
+          <InlineRename value={sel.name} onsave={(n) => { renaming = false; void app.renameCrosshair(sel.id, n); }} oncancel={() => (renaming = false)} />
+        {:else}
+          <span class="sec display name">{sel.name}{#if sel.exe}<span class="mono exe"> · {sel.exe}</span>{/if}</span>
+          <span class="grow"></span>
+          <button class="chip xs" onclick={() => (renaming = true)}>RENAME</button>
+          <button class="chip xs" onclick={() => (picker = "bind")}>{sel.exe ? "REBIND" : "BIND"}</button>
+          <button class="chip xs" onclick={() => void app.duplicateCrosshair(sel.id)}>DUPLICATE</button>
+          <ArmChip label="DELETE" size="xs" disabled={userCount <= 1} onconfirm={() => void app.deleteCrosshair(sel.id)} />
+        {/if}
+      </div>
 
-      <section class="card editor">
-        <div class="left">
-          <div class="stage">
-            <canvas bind:this={canvas} class="main" style="width: {PREVIEW}px; height: {PREVIEW}px;"></canvas>
-            {#if zoom > 1}
-              <div class="inset" title="Actual size">
-                <canvas bind:this={inset} style="width: {INSET}px; height: {INSET}px;"></canvas>
-                <span>1:1</span>
-              </div>
-            {/if}
-            {#if empty}<div class="stage-empty">Turn on a part to draw</div>{/if}
-          </div>
-          <div class="zoom" role="group" aria-label="Preview zoom">
-            {#each ZOOMS as z (z)}
-              <button class:on={zoom === z} aria-pressed={zoom === z} onclick={() => (zoom = z)}>{z}×</button>
+      <div class="panels">
+        <XPanel title="SHAPE" always>
+          <div class="shapes">
+            {#each SHAPES as s, i}
+              <button class="shape" class:on={style.shape === i} title={s} aria-label={s} onclick={() => set("shape", i)}>
+                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="square">
+                  {#if i === 0}<path d="M8 1v4M8 11v4M1 8h4M11 8h4" />
+                  {:else if i === 1}<path d="M2 2l4 4M14 2l-4 4M2 14l4-4M14 14l-4-4" />
+                  {:else if i === 2}<path d="M8 11v4M1 8h4M11 8h4" />
+                  {:else if i === 3}<path d="M3 12l5-5 5 5" />
+                  {:else}<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" />{/if}
+                </svg>
+              </button>
             {/each}
           </div>
-          <p class="legend">
-            {zoom === 1 ? "Actual size — exact screen pixels" : `${zoom}× zoom · grid = screen pixels`}
-          </p>
-        </div>
+        </XPanel>
 
-        <div class="right">
-          <div class="sec">
-            <div class="sec-head">
-              <span class="sec-title"><Palette size={14} /> Color</span>
-            </div>
-            <div class="sec-body">
-              <div class="swatches span">
-                {#each COLORS as c (c)}
-                  <button
-                    class="sw"
-                    class:on={style.color.toLowerCase() === c}
-                    style="--c: {c}"
-                    aria-label="Color {c}"
-                    onclick={() => setColor(c)}
-                  ></button>
-                {/each}
-                <label class="sw custom" title="Custom color">
-                  <input type="color" bind:value={style.color} aria-label="Custom color" />
-                </label>
-                <span class="hex mono">{style.color.toUpperCase()}</span>
-              </div>
-              <div class="span">
-                <Slider label="Opacity" bind:value={style.opacity} min={0.1} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} />
-              </div>
+        <XPanel title="COLOR" always>
+          <div class="color-row">
+            <input class="field hex mono" value={style.color} maxlength={7} spellcheck="false" onchange={(e) => { const v = e.currentTarget.value.trim(); if (validHex(v)) set("color", v.toLowerCase()); else e.currentTarget.value = style.color; }} />
+            <div class="swatches">
+              {#each SWATCHES as c}
+                <button class="sw" class:on={style.color === c} style="background: {c}" aria-label={c} onclick={() => set("color", c)}></button>
+              {/each}
+              <label class="sw custom" class:on={!SWATCHES.includes(style.color)} title="Custom">
+                <input type="color" value={style.color} oninput={(e) => set("color", e.currentTarget.value)} />
+              </label>
             </div>
           </div>
+          <SliderRow label="OPACITY" value={Math.round(style.opacity * 100)} min={10} max={100} format={(v) => `${v}%`} onchange={(v) => set("opacity", v / 100)} />
+          <div class="trow">
+            <span class="display tl2">GLOW</span>
+            <button class="toggle" class:on={style.glow} aria-label="Glow" onclick={() => set("glow", !style.glow)}></button>
+          </div>
+          {#if style.glow}
+            <SliderRow label="RADIUS" value={style.glow_radius} min={0} max={8} onchange={(v) => set("glow_radius", v)} />
+          {/if}
+        </XPanel>
 
-          <div class="sec" class:off={!style.arms}>
-            <div class="sec-head">
-              <span class="sec-title"><CrossIcon size={14} /> Cross</span>
-              {@render partSwitch(style.arms, "Cross", "arms")}
+        <XPanel title="INNER LINES" on={style.arms} ontoggle={(v) => set("arms", v)}>
+          <SliderRow label="LENGTH" value={style.length} min={1} max={40} onchange={(v) => set("length", v)} />
+          <SliderRow label="THICKNESS" value={style.thickness} min={1} max={10} onchange={(v) => set("thickness", v)} />
+          <SliderRow label="GAP" value={style.gap} min={0} max={30} onchange={(v) => set("gap", v)} />
+        </XPanel>
+
+        <XPanel title="OUTER LINES" on={style.outer} ontoggle={(v) => set("outer", v)}>
+          <SliderRow label="LENGTH" value={style.outer_length} min={1} max={40} onchange={(v) => set("outer_length", v)} />
+          <SliderRow label="THICKNESS" value={style.outer_thickness} min={1} max={10} onchange={(v) => set("outer_thickness", v)} />
+          <SliderRow label="GAP" value={style.outer_gap} min={0} max={60} onchange={(v) => set("outer_gap", v)} />
+          <SliderRow label="OPACITY" value={Math.round(style.outer_opacity * 100)} min={10} max={100} format={(v) => `${v}%`} onchange={(v) => set("outer_opacity", v / 100)} />
+        </XPanel>
+
+        <XPanel title="CENTER DOT" on={style.dot} ontoggle={(v) => set("dot", v)}>
+          <SliderRow label="SIZE" value={style.dot_size} min={1} max={10} onchange={(v) => set("dot_size", v)} />
+        </XPanel>
+
+        <XPanel title="RING" on={style.ring} ontoggle={(v) => set("ring", v)}>
+          <SliderRow label="RADIUS" value={style.ring_radius} min={2} max={60} onchange={(v) => set("ring_radius", v)} />
+          <SliderRow label="THICKNESS" value={style.ring_thickness} min={1} max={6} onchange={(v) => set("ring_thickness", v)} />
+        </XPanel>
+
+        <XPanel title="OUTLINE" on={style.outline} ontoggle={(v) => set("outline", v)}>
+          <SliderRow label="THICKNESS" value={style.outline_thickness} min={1} max={3} onchange={(v) => set("outline_thickness", v)} />
+          <div class="trow">
+            <span class="display tl2">COLOR</span>
+            <div class="swatches">
+              {#each ["#000000", "#ffffff"] as c}
+                <button class="sw" class:on={style.outline_color === c} style="background: {c}" aria-label={c} onclick={() => set("outline_color", c)}></button>
+              {/each}
+              <label class="sw custom" class:on={!["#000000", "#ffffff"].includes(style.outline_color)} title="Custom">
+                <input type="color" value={style.outline_color} oninput={(e) => set("outline_color", e.currentTarget.value)} />
+              </label>
             </div>
-            {#if style.arms}
-              <div class="sec-body" transition:slide={SLIDE}>
-                <Slider label="Length" bind:value={style.length} min={1} max={40} step={1} format={px} />
-                <Slider label="Thickness" bind:value={style.thickness} min={1} max={10} step={1} format={px} />
-                <Slider label="Gap" bind:value={style.gap} min={0} max={30} step={1} format={px} />
-                <div class="inline-opt">
-                  <span class="field-label">T-style</span>
-                  {@render partSwitch(style.t_style, "T-style (no top arm)", "t_style")}
-                </div>
-              </div>
+          </div>
+        </XPanel>
+
+        <XPanel title="POSITION" always>
+          <div class="trow">
+            {#if style.offset_x === 0 && style.offset_y === 0}
+              <span class="mono pos">DEAD CENTER</span>
+            {:else}
+              <span class="mono pos">{style.offset_x > 0 ? "+" : ""}{style.offset_x} · {style.offset_y > 0 ? "+" : ""}{style.offset_y}</span>
+              <button class="lnk" onclick={() => { style.offset_x = 0; style.offset_y = 0; commit(); }}>RE-CENTER</button>
             {/if}
           </div>
-
-          <div class="sec" class:off={!style.dot}>
-            <div class="sec-head">
-              <span class="sec-title"><CircleDot size={14} /> Center dot</span>
-              {@render partSwitch(style.dot, "Center dot", "dot")}
-            </div>
-            {#if style.dot}
-              <div class="sec-body" transition:slide={SLIDE}>
-                <Slider label="Size" bind:value={style.dot_size} min={1} max={10} step={1} format={px} />
-              </div>
-            {/if}
+          <SliderRow label="NUDGE X" value={style.offset_x} min={-50} max={50} onchange={(v) => set("offset_x", v)} />
+          <SliderRow label="NUDGE Y" value={style.offset_y} min={-50} max={50} onchange={(v) => set("offset_y", v)} />
+          <div class="trow">
+            <span class="display tl2">SCALE WITH RESOLUTION</span>
+            <button class="toggle" class:on={style.scale_with_resolution} aria-label="Scale with resolution" onclick={() => set("scale_with_resolution", !style.scale_with_resolution)}></button>
           </div>
+        </XPanel>
 
-          <div class="sec" class:off={!style.ring}>
-            <div class="sec-head">
-              <span class="sec-title"><Circle size={14} /> Ring</span>
-              {@render partSwitch(style.ring, "Ring", "ring")}
-            </div>
-            {#if style.ring}
-              <div class="sec-body" transition:slide={SLIDE}>
-                <Slider label="Radius" bind:value={style.ring_radius} min={2} max={60} step={1} format={px} />
-                <Slider label="Thickness" bind:value={style.ring_thickness} min={1} max={6} step={1} format={px} />
-              </div>
-            {/if}
+        <XPanel title="SHARE CODE" always tone="telemetry">
+          <div class="code-row">
+            <span class="tag2 mono">EXFIL-1</span>
+            <input class="field code mono" readonly value={code} onfocus={(e) => e.currentTarget.select()} />
           </div>
-
-          <div class="sec" class:off={!style.outline}>
-            <div class="sec-head">
-              <span class="sec-title"><Square size={14} /> Outline</span>
-              {@render partSwitch(style.outline, "Outline", "outline")}
-            </div>
-            {#if style.outline}
-              <div class="sec-body" transition:slide={SLIDE}>
-                <Slider label="Thickness" bind:value={style.outline_thickness} min={1} max={3} step={1} format={px} />
-                <div class="swatches">
-                  {#each OUTLINE_COLORS as c (c)}
-                    <button
-                      class="sw sm"
-                      class:on={style.outline_color.toLowerCase() === c}
-                      style="--c: {c}"
-                      aria-label="Outline {c}"
-                      onclick={() => setOutlineColor(c)}
-                    ></button>
-                  {/each}
-                  <label class="sw sm custom" title="Custom outline color">
-                    <input type="color" bind:value={style.outline_color} aria-label="Custom outline color" />
-                  </label>
-                </div>
-              </div>
-            {/if}
+          <div class="code-acts">
+            <button class="chip xs" onclick={copyCode}>COPY</button>
+            <button class="chip xs" onclick={() => void pasteCode(true)}>PASTE</button>
           </div>
-
-          <div class="sec">
-            <div class="sec-head">
-              <span class="sec-title"><Move size={14} /> Position</span>
-              {#if nudged}
-                <button class="link" onclick={resetNudge}>Re-center</button>
-              {:else}
-                <span class="centered">Dead center</span>
-              {/if}
-            </div>
-            <div class="sec-body">
-              <Slider label="Nudge X" bind:value={style.offset_x} min={-50} max={50} step={1} format={signed} />
-              <Slider label="Nudge Y" bind:value={style.offset_y} min={-50} max={50} step={1} format={signed} />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <footer class="foot">
-        {@render hotkeyHint(store.enabled)}
-        <div class="spacer"></div>
-        {@render toastChip()}
-      </footer>
-    {:else}
-      {@render toastChip()}
+        </XPanel>
+      </div>
     {/if}
-  </main>
+  </section>
 </div>
+{/if}
 
-{#snippet overlaySwitch(on: boolean)}
-  <button class="overlay-switch" class:on role="switch" aria-checked={on} onclick={toggleOverlay}>
-    <span class="track"><span class="knob"></span></span>
-    Overlay {on ? "on" : "off"}
-  </button>
-{/snippet}
-
-{#snippet hotkeyHint(on: boolean)}
-  <span class="hint" class:off={!on}>
-    <Keyboard size={13} />
-    <span class="mono">Ctrl+Shift+F11</span> toggles · primary monitor · borderless/windowed games
-  </span>
-{/snippet}
-
-{#snippet toastChip()}
-  {#if toast}
-    <span class="toast" class:err={toast.kind === "err"}>
-      {#if toast.kind === "err"}<XCircle size={13} />{:else}<CheckCircle2 size={13} />{/if}
-      {toast.msg}
-    </span>
-  {/if}
-{/snippet}
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
+{#if picker === "create"}
+  <ProgramPicker sub="A new crosshair named after the game, bound to it" onpick={(exe, title) => void app.createCrosshair(title.trim() || exe, null, exe)} onclose={() => (picker = null)} {boundTo} />
+{:else if picker === "bind" && sel}
+  <ProgramPicker sub="Switches {sel.name} in while this program is in front" onpick={(exe) => void app.bindCrosshair(sel.id, exe)} onclose={() => (picker = null)} {boundTo} />
+{/if}
 
 <style>
-  .xview { flex: 1; display: flex; min-height: 0; }
+  .new-wrap { position: relative; display: flex; align-items: stretch; }
+  .new {
+    display: inline-flex; align-items: center; gap: 4px; padding: 0 12px; border: 0; background: transparent;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent); cursor: pointer; white-space: nowrap;
+  }
+  .new:hover { color: var(--accent-hover); }
+  .new-menu { position: absolute; top: calc(100% + 2px); right: 0; min-width: 210px; z-index: 30; }
+  .ov {
+    display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border: 1px solid var(--hud-line-3);
+    border-radius: var(--hud-r); background: var(--hud-panel); font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+    color: var(--hud-fg-dim); cursor: pointer; white-space: nowrap;
+  }
+  .ov.on { color: var(--hud-fg-hi); border-color: color-mix(in oklab, var(--accent) 35%, var(--hud-line-3)); }
+  .ov-state { font-size: 10px; color: var(--hud-fg-faint); }
+  .ov.on .ov-state { color: var(--accent); }
 
-  /* ── None panel: per-game overview ── */
-  .games { flex-shrink: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
-  .games-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
-  .games-note { font-size: var(--fs-xs); color: var(--fg-faint); }
-  .game-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 8px;
-    border-radius: var(--radius);
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--fg-2);
-    font: inherit;
-    font-size: var(--fs-sm);
-    text-align: left;
-    cursor: pointer;
-    transition: background 120ms ease, border-color 120ms ease;
+  .body {
+    flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 14px; padding: 14px 16px;
   }
-  .game-row:hover { background: var(--surface-hover); border-color: var(--border); }
-  .game-thumb {
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    background: radial-gradient(circle at 50% 35%, oklch(0.36 0.008 250), oklch(0.2 0.006 250));
-    box-shadow: inset 0 1px 0 color-mix(in oklab, white 10%, transparent), inset 0 0 0 1px oklch(0 0 0 / 0.35);
-    overflow: hidden;
-  }
-  .game-thumb img { width: 100%; height: 100%; }
-  .game-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .game-exe { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-subtle); flex-shrink: 0; }
-  .games-empty { margin: 4px 0 2px; font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.6; }
-  .games-empty strong { color: var(--fg-2); font-weight: 600; }
-
-  /* ── Panel: hero + footer fixed, only the controls column scrolls ── */
-  .panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px 22px;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-  }
-  .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-shrink: 0; }
-  .hero-text { min-width: 0; }
-  h1 { margin: 0; font-size: var(--fs-hero); font-weight: 650; letter-spacing: -0.02em; line-height: 1.15; }
-  .title {
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--fg);
-    font: inherit;
-    letter-spacing: inherit;
-    cursor: text;
-    text-align: left;
-  }
-  .rename {
-    width: 100%;
-    max-width: 320px;
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--border-strong));
-    background: var(--field);
-    color: var(--fg);
-    font: inherit;
-    font-size: var(--fs-hero);
-    font-weight: 650;
-    outline: none;
-    box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 18%, transparent);
-  }
-  .sub {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 5px 0 0;
-    font-size: var(--fs-sm);
-    color: var(--fg-muted);
-  }
-  .sub :global(svg) { flex-shrink: 0; opacity: 0.75; }
-  .sub span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sub strong { color: var(--fg-2); font-weight: 600; }
-  .hero-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-  .icon-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 30px;
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--field);
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: var(--fs-xs);
-    cursor: pointer;
-    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
-  }
-  .icon-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
-  .overlay-switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 30px;
-    padding: 0 11px 0 7px;
-    border-radius: 999px;
-    border: 1px solid var(--border-strong);
-    background: var(--field);
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: var(--fs-xs);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 140ms ease, color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-  }
-  .overlay-switch.on {
-    color: var(--fg);
-    border-color: color-mix(in oklab, var(--accent) 55%, transparent);
-    background: color-mix(in oklab, var(--accent) 12%, var(--field));
-    box-shadow: 0 0 14px color-mix(in oklab, var(--accent) 22%, transparent);
-  }
-  .track {
-    position: relative;
-    width: 26px;
-    height: 15px;
-    border-radius: 999px;
-    background: var(--border-strong);
-    transition: background 140ms ease;
-  }
-  .overlay-switch.on .track { background: var(--accent); }
-  .track .knob {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    background: white;
-    transition: transform 160ms var(--ease-soft, ease);
-  }
-  .overlay-switch.on .knob { transform: translateX(11px); }
-
-  /* ── Editor card ── */
-  .editor {
-    flex: 1;
-    min-height: 0;
-    padding: 16px 6px 16px 18px;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 20px;
-  }
-  .left { display: flex; flex-direction: column; gap: 9px; width: 200px; }
-  .right {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    padding-right: 12px;
-    scrollbar-gutter: stable;
-  }
+  .body.grid { background-image: var(--hud-grid); background-size: 24px 24px; }
+  .stage-col { display: flex; flex-direction: column; min-height: 0; }
   .stage {
-    position: relative;
-    width: 200px;
-    height: 200px;
-    border-radius: var(--radius-lg, 12px);
-    overflow: hidden;
-    /* Sky/ground split at dead center so light and dark crosshairs both read. */
-    background: linear-gradient(
-      180deg,
-      oklch(0.68 0.06 230) 0%,
-      oklch(0.5 0.05 230) 50%,
-      oklch(0.3 0.04 135) 50%,
-      oklch(0.17 0.02 135) 100%
-    );
-    border: 1px solid var(--border);
-    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), var(--shadow-lg);
+    position: relative; flex: 1; min-height: 0; border: 1px solid var(--hud-line-3); border-radius: var(--hud-r); overflow: hidden;
+    background-size: cover; background-position: center;
   }
-  canvas { display: block; image-rendering: pixelated; }
+  .bd-scene { background-image: linear-gradient(180deg, oklch(0.6 0.06 230) 0%, oklch(0.46 0.05 230) 50%, oklch(0.3 0.04 135) 50%, oklch(0.16 0.02 135) 100%); }
+  .bd-bright { background-color: #e8e8e8; }
+  .bd-dark { background-color: #1a1a1a; }
+  .bd-noise { background-image: repeating-conic-gradient(#2a2a2a 0 25%, #3a3a3a 0 50%); background-size: 8px 8px; }
+  .cv { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .none-pill {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 6px 12px; border-radius: var(--hud-r);
+    background: oklch(0 0 0 / 0.6); border: 1px dashed var(--hud-line-6); font-size: 10px; letter-spacing: 0.12em; color: var(--hud-fg-3);
+  }
+  .tag { position: absolute; top: 10px; font-size: 10px; letter-spacing: 0.1em; color: rgba(255,255,255,0.8); text-shadow: 0 1px 2px #000; pointer-events: none; }
+  .tag.tl { left: 10px; }
+  .tag.tr { right: 10px; padding: 2px 6px; border-radius: 2px; background: oklch(0 0 0 / 0.45); }
+  .tag.cyan { color: var(--telemetry-text); }
   .inset {
-    position: absolute;
-    right: 6px;
-    bottom: 6px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: linear-gradient(180deg, oklch(0.5 0.05 230) 50%, oklch(0.3 0.04 135) 50%);
-    border: 1px solid oklch(0 0 0 / 0.45);
-    box-shadow: 0 4px 12px oklch(0 0 0 / 0.45), inset 0 1px 0 oklch(1 0 0 / 0.1);
+    position: absolute; right: 10px; bottom: 10px; width: 72px; height: 72px; border: 1px solid rgba(255,255,255,0.25); border-radius: 2px;
+    background: #000 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Crect width='4' height='4' fill='%23222'/%3E%3Crect x='4' y='4' width='4' height='4' fill='%23222'/%3E%3C/svg%3E");
   }
-  .inset span {
-    position: absolute;
-    top: 2px;
-    left: 4px;
-    font-size: 9px;
-    font-weight: 600;
-    color: white;
-    opacity: 0.75;
-    text-shadow: 0 1px 2px black;
-  }
-  .stage-empty {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    font-size: var(--fs-xs);
-    color: white;
-    text-shadow: 0 1px 2px black;
-  }
-  .zoom {
-    display: flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: var(--radius-sm);
-    background: var(--field);
-    border: 1px solid var(--border);
-  }
-  .zoom button {
-    flex: 1;
-    padding: 4px 0;
-    border: none;
-    border-radius: var(--radius-xs);
-    background: transparent;
-    color: var(--fg-muted);
-    font: inherit;
-    font-size: var(--fs-xs);
-    cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
-  }
-  .zoom button:hover { color: var(--fg); }
-  .zoom button.on { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--fg); }
-  .legend { margin: 0; font-size: 10px; color: var(--fg-faint); text-align: center; }
+  .inset canvas { display: block; }
+  .inset span { position: absolute; left: 3px; bottom: 1px; font-size: 8px; color: rgba(255,255,255,0.6); }
+  .zoom { position: absolute; left: 10px; bottom: 10px; display: flex; border: 1px solid var(--hud-line-5); border-radius: var(--hud-r); overflow: hidden; background: oklch(0 0 0 / 0.55); }
+  .zc { width: 30px; height: 20px; border: 0; background: transparent; font-size: 10px; color: var(--hud-fg-3); cursor: pointer; }
+  .zc + .zc { border-left: 1px solid var(--hud-line-4); }
+  .zc.on { background: var(--accent); color: var(--accent-fg); font-weight: 600; }
+  .picker { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 4px; padding: 3px; border-radius: var(--hud-r); background: oklch(0 0 0 / 0.55); }
+  .bp { width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.15); border-radius: 2px; padding: 0; cursor: pointer; background-size: cover; background-position: center; }
+  .bp.on { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .bp.add { display: grid; place-items: center; background: transparent; color: var(--hud-fg-3); }
+  .bp.add:hover { color: var(--hud-fg-hi); }
+  .hidden-file { display: none; }
 
-  /* ── Sections ── */
-  .sec {
-    flex-shrink: 0;
-    padding: 10px 12px;
-    border-radius: var(--radius);
-    border: 1px solid var(--border);
-    background: linear-gradient(180deg, color-mix(in oklab, white 2.5%, transparent), transparent);
-    transition: border-color 160ms ease, background 160ms ease;
-  }
-  .sec.off { background: transparent; border-style: dashed; }
-  .sec-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
-  .sec-title { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); }
-  .sec-title :global(svg) { color: var(--accent); }
-  .sec.off .sec-title { color: var(--fg-subtle); }
-  .sec.off .sec-title :global(svg) { color: var(--fg-faint); }
-  .sec-body {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 16px;
-    padding-top: 12px;
-    align-items: start;
-  }
-  .span { grid-column: 1 / -1; }
-  .sec-body :global(.slider) { margin-bottom: 10px; }
-  .inline-opt { display: flex; align-items: center; justify-content: space-between; padding-top: 18px; }
-  .centered { font-size: var(--fs-xs); color: var(--fg-faint); }
-  .mini-switch {
-    position: relative;
-    flex-shrink: 0;
-    width: 30px;
-    height: 17px;
-    padding: 0;
-    border: none;
-    border-radius: 999px;
-    background: var(--border-strong);
-    cursor: pointer;
-    transition: background 150ms ease, box-shadow 150ms ease;
-  }
-  .mini-switch .knob {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    background: white;
-    box-shadow: 0 1px 2px oklch(0 0 0 / 0.4);
-    transition: transform 170ms var(--ease-soft, ease);
-  }
-  .mini-switch.on { background: var(--accent); box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 35%, transparent); }
-  .mini-switch.on .knob { transform: translateX(13px); }
-  .swatches { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 12px; }
-  .sw {
-    position: relative;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid oklch(0 0 0 / 0.4);
-    background: var(--c);
-    cursor: pointer;
-    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.25);
-    transition: transform 100ms ease, box-shadow 120ms ease;
-  }
-  .sw.sm { width: 18px; height: 18px; }
-  .sw:hover { transform: scale(1.1); }
-  .sw.on { box-shadow: 0 0 0 2px var(--bg-elev-2), 0 0 0 4px color-mix(in oklab, var(--c) 80%, white); }
-  .sw.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); overflow: hidden; }
-  .sw.custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-  .hex { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-subtle); }
-  .link {
-    flex-shrink: 0;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--accent);
-    font: inherit;
-    font-size: var(--fs-xs);
-    cursor: pointer;
-  }
-  .link:hover { text-decoration: underline; }
+  .side { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .actions { height: 26px; flex: 0 0 26px; display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .sec { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: var(--hud-fg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sec.name { color: var(--hud-fg-hi); font-size: 11px; text-transform: uppercase; }
+  .exe { font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--hud-fg-low); }
+  .grow { flex: 1; }
+  .panels { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; }
+  .shapes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .shape { height: 28px; display: grid; place-items: center; border: 1px solid var(--hud-line-3); border-radius: var(--hud-r); background: var(--hud-pill); color: var(--hud-fg-dim); cursor: pointer; }
+  .shape:hover { color: var(--hud-fg); }
+  .shape.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .color-row { display: flex; align-items: center; gap: 8px; }
+  .hex { width: 76px; height: 24px; font-size: 11px; }
+  .swatches { display: flex; gap: 6px; }
+  .sw { width: 16px; height: 16px; border: 0; border-radius: 2px; padding: 0; cursor: pointer; }
+  .sw.on { outline: 2px solid var(--hud-fg); outline-offset: 1px; }
+  .sw.custom { position: relative; background: conic-gradient(#f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00); overflow: hidden; }
+  .sw.custom input { position: absolute; inset: -4px; width: 200%; height: 200%; opacity: 0; cursor: pointer; }
+  .trow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 16px; }
+  .tl2 { font-size: 10px; font-weight: 600; letter-spacing: 0.12em; color: var(--hud-fg-dim); }
+  .pos { font-size: 10px; letter-spacing: 0.08em; color: var(--hud-fg-3); }
+  .lnk { padding: 0; border: 0; background: transparent; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--accent); cursor: pointer; }
+  .lnk:hover { color: var(--accent-hover); }
+  .code-row { display: flex; align-items: center; gap: 6px; }
+  .tag2 { font-size: 9px; letter-spacing: 0.1em; padding: 2px 5px; border-radius: 2px; background: color-mix(in oklab, var(--telemetry) 15%, transparent); color: var(--telemetry-text); }
+  .code { flex: 1; height: 26px; font-size: 10px; color: var(--hud-fg-2); }
+  .code-acts { display: flex; gap: 6px; }
 
-  /* ── Footer ── */
-  .foot { display: flex; align-items: center; gap: 12px; flex-shrink: 0; min-height: 28px; margin-top: auto; }
-  .spacer { flex: 1; }
-  .hint { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-subtle); }
-  .hint.off { color: var(--fg-faint); }
-  .toast {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: var(--fs-sm);
-    color: var(--ok);
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    background: var(--ok-soft);
-    animation: toast-in 160ms var(--ease-soft, ease);
-  }
-  .toast.err { color: var(--danger); background: var(--danger-soft); }
-  @keyframes toast-in {
-    from { opacity: 0; transform: translateY(2px) scale(0.97); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .game-row:focus-visible,
-  .title:focus-visible,
-  .icon-btn:focus-visible,
-  .overlay-switch:focus-visible,
-  .mini-switch:focus-visible,
-  .zoom button:focus-visible,
-  .sw:focus-visible,
-  .sw:focus-within,
-  .link:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--ring);
-  }
+  .bound-list { display: flex; flex-direction: column; gap: 6px; }
+  .bound-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; text-align: left; color: var(--hud-fg); }
+  .bound-row:hover { background: var(--hud-hover); }
+  .bound-row img { width: 14px; height: 14px; image-rendering: pixelated; }
+  .bn { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+  .be { font-size: 10px; color: var(--hud-fg-low); }
+  .empty { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 20px 16px; border: 1px dashed var(--hud-line-4); border-radius: var(--hud-r); text-align: center; }
+  .empty .chip { justify-content: center; }
+  .et { font-size: 12px; font-weight: 700; letter-spacing: 0.14em; color: var(--hud-fg-2); }
+  .ed { font-size: 10px; color: var(--hud-fg-low); line-height: 1.5; margin-bottom: 6px; }
 </style>

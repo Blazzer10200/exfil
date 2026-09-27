@@ -6,7 +6,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
-  import { AppWindow, RotateCcw, Power } from "lucide-svelte";
+  import { AppWindow, Crosshair, RotateCcw, Power } from "lucide-svelte";
+  import { getCrosshairs, getPresets, NO_CROSSHAIR } from "$lib/api";
 
   const MARGIN = 12; // transparent gutter so the CSS shadow has room to render
   const win = getCurrentWindow();
@@ -14,9 +15,23 @@
   let menuEl: HTMLElement | undefined = $state();
   let version = $state("");
   let openSeq = $state(0); // bumped per open so the entrance animation replays
+  let preset = $state("—");
+  let xhair = $state("NONE");
+  let overlayOn = $state(false);
 
-  function act(action: "show" | "reset" | "quit") {
+  function act(action: "show" | "reset" | "quit" | "crosshair") {
     invoke("tray_action", { action }).catch(() => win.hide());
+  }
+
+  async function refresh() {
+    try {
+      const [p, c] = await Promise.all([getPresets(), getCrosshairs()]);
+      preset = (p.presets.find((x) => x.slot === p.active)?.name ?? "Normal").toUpperCase();
+      overlayOn = c.enabled;
+      xhair = c.selected === NO_CROSSHAIR ? "NONE" : (c.crosshairs.find((x) => x.id === c.selected)?.name ?? "NONE").toUpperCase();
+    } catch {
+      // the menu still works without the readout
+    }
   }
 
   function autofocus(node: HTMLElement) {
@@ -29,21 +44,22 @@
     const items = [...(menuEl?.querySelectorAll<HTMLButtonElement>(".item") ?? [])];
     if (!items.length) return;
     const i = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next =
-      e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+    const next = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
     items[next].focus();
   }
 
   onMount(() => {
     getVersion().then((v) => (version = v));
+    refresh();
     // Fit the transparent window exactly around the rendered menu.
     if (menuEl) {
       const r = menuEl.getBoundingClientRect();
-      win.setSize(
-        new LogicalSize(Math.ceil(r.width) + MARGIN * 2, Math.ceil(r.height) + MARGIN * 2),
-      );
+      win.setSize(new LogicalSize(Math.ceil(r.width) + MARGIN * 2, Math.ceil(r.height) + MARGIN * 2));
     }
-    const unlisten = win.listen("tray-open", () => (openSeq += 1));
+    const unlisten = win.listen("tray-open", () => {
+      openSeq += 1;
+      refresh();
+    });
     return () => {
       unlisten.then((u) => u());
     };
@@ -52,33 +68,26 @@
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && win.hide()} />
 
-<button class="backdrop" aria-label="Close menu" onclick={() => win.hide()}></button>
+<button class="bd" aria-label="Close menu" onclick={() => win.hide()}></button>
 
 {#key openSeq}
-  <div
-    class="menu"
-    role="menu"
-    aria-label="EXFIL tray menu"
-    tabindex="-1"
-    use:autofocus
-    bind:this={menuEl}
-    onkeydown={onMenuKey}
-  >
+  <div class="tray" role="menu" aria-label="EXFIL tray menu" tabindex="-1" use:autofocus bind:this={menuEl} onkeydown={onMenuKey}>
     <div class="brand">
-      <span class="dot"></span>
-      EXFIL
+      <span class="sq"></span>
+      <span class="name display">EXFIL</span>
       {#if version}<span class="ver mono">v{version}</span>{/if}
     </div>
-    <button class="item" role="menuitem" onclick={() => act("show")}>
-      <AppWindow size={15} /> Show EXFIL
+    <div class="active mono">
+      <span class="k">ACTIVE</span>
+      <span class="v">{preset} · {xhair}</span>
+    </div>
+    <button class="item" role="menuitem" onclick={() => act("show")}><AppWindow size={13} /> SHOW EXFIL</button>
+    <button class="item" role="menuitem" onclick={() => act("crosshair")}>
+      <Crosshair size={13} /> CROSSHAIR <span class="state" class:on={overlayOn}>{overlayOn ? "ON" : "OFF"}</span>
     </button>
-    <button class="item" role="menuitem" onclick={() => act("reset")}>
-      <RotateCcw size={15} /> Reset display
-    </button>
+    <button class="item" role="menuitem" onclick={() => act("reset")}><RotateCcw size={13} /> RESET DISPLAY</button>
     <div class="sep"></div>
-    <button class="item danger" role="menuitem" onclick={() => act("quit")}>
-      <Power size={15} /> Quit
-    </button>
+    <button class="item danger" role="menuitem" onclick={() => act("quit")}><Power size={13} /> QUIT</button>
   </div>
 {/key}
 
@@ -87,8 +96,7 @@
   :global(body) {
     background: transparent !important;
   }
-
-  .backdrop {
+  .bd {
     position: fixed;
     inset: 0;
     background: transparent;
@@ -96,98 +104,111 @@
     padding: 0;
     cursor: default;
   }
-
-  .menu {
+  .tray {
     position: fixed;
     top: 12px;
     left: 12px;
     width: 200px;
-    padding: 5px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
     gap: 2px;
-    background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 5%, transparent);
-    animation: menu-in 130ms var(--ease-soft);
+    background: oklch(0.14 0.004 250);
+    border: 1px solid var(--hud-line-5);
+    border-top: 2px solid var(--accent);
+    border-radius: var(--hud-r);
+    box-shadow: 0 18px 40px oklch(0 0 0 / 0.6);
+    animation: tray-in 130ms var(--ease-hud);
     transform-origin: bottom left;
-  }
-  .menu:focus {
     outline: none;
   }
-  @keyframes menu-in {
-    from { opacity: 0; transform: scale(0.95) translateY(4px); }
-    to { opacity: 1; transform: scale(1) translateY(0); }
+  @keyframes tray-in {
+    from { opacity: 0; transform: scale(0.96) translateY(4px); }
+    to { opacity: 1; transform: none; }
   }
-
   .brand {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 6px 9px 7px;
-    font-size: var(--fs-xs);
-    font-weight: 650;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
+    gap: 8px;
+    padding: 6px 8px 4px;
   }
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
+  .sq {
+    width: 8px;
+    height: 8px;
+    border-radius: 1px;
     background: var(--accent);
     box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 70%, transparent);
   }
+  .name {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: var(--hud-fg-hi);
+  }
   .ver {
     margin-left: auto;
-    font-weight: 400;
-    letter-spacing: 0;
-    color: var(--fg-faint);
+    font-size: 10px;
+    color: var(--hud-fg-faint);
   }
-
-  .sep {
-    height: 1px;
-    margin: 3px 6px;
-    background: var(--border);
+  .active {
+    display: flex;
+    gap: 8px;
+    padding: 4px 8px 8px;
+    font-size: 9.5px;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--hud-line-2);
+    margin-bottom: 4px;
   }
-
+  .active .k {
+    color: var(--hud-fg-faint);
+  }
+  .active .v {
+    color: var(--hud-fg-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .item {
     display: flex;
     align-items: center;
-    gap: 9px;
-    width: 100%;
-    padding: 7px 9px;
+    gap: 8px;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--hud-r);
     background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--fg-2);
-    font: inherit;
-    font-size: var(--fs-sm);
+    font-family: var(--font-display);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--hud-fg-2);
     text-align: left;
     cursor: pointer;
-    transition: background 110ms ease, color 110ms ease, transform 80ms ease;
   }
-  .item :global(svg) {
-    flex-shrink: 0;
-    opacity: 0.8;
-    transition: opacity 110ms ease;
-  }
-  .item:hover {
-    background: var(--surface-hover);
-    color: var(--fg);
-  }
-  .item:hover :global(svg) {
-    opacity: 1;
-  }
-  .item:active {
-    transform: scale(0.98);
-  }
+  .item:hover,
   .item:focus-visible {
+    background: var(--hud-hover);
+    color: var(--hud-fg-hi);
     outline: none;
-    box-shadow: 0 0 0 2px var(--ring);
+  }
+  .item.danger {
+    color: var(--danger);
   }
   .item.danger:hover {
     background: var(--danger-soft);
-    color: var(--danger);
+  }
+  .state {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--hud-fg-faint);
+  }
+  .state.on {
+    color: var(--ok);
+  }
+  .sep {
+    height: 1px;
+    margin: 3px 4px;
+    background: var(--hud-line-2);
   }
 </style>

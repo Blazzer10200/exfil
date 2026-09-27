@@ -1,235 +1,450 @@
-/* ─────────────────────────────────────────────────────────────
-   EXFIL v2 — design tokens (OKLCH), adapted from Rift's Graphite
-   Ink system. Dark only. Accent = amber (EXFIL brand/active rule).
-   ───────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   EXFIL — Tactical HUD design language
+   Dark operator console: 52px icon rail, breadcrumb titlebar, section strip,
+   telemetry status bar. One easing everywhere; amber = action, cyan = data.
+   ═══════════════════════════════════════════════════════════════════════════ */
 
-:root,
-[data-mode="dark"] {
-  /* surface stack — Graphite Ink */
-  --bg:            oklch(0.142 0.003 250);
-  --bg-inset:      oklch(0.178 0.004 250);
-  --bg-elev-1:     oklch(0.215 0.004 250);
-  --bg-elev-2:     oklch(0.262 0.005 250);
-  --bg-elev-3:     oklch(0.300 0.006 255);
-  --surface:       oklch(0.215 0.004 250);
-  --surface-hover: oklch(0.262 0.005 250);
-  --surface-active:oklch(0.300 0.006 255);
+:root {
+  /* Surfaces */
+  --hud-bg: oklch(0.12 0.004 250);
+  --hud-rail: oklch(0.10 0.004 250);
+  --hud-panel: oklch(0.16 0.004 250);
+  --hud-panel-2: oklch(0.15 0.004 250);
+  --hud-hover: oklch(0.185 0.004 250);
+  --hud-pill: oklch(0.20 0.004 250);
+  --hud-field: oklch(0.12 0.004 250);
+  --hud-track: oklch(0.28 0.005 250);
+  --hud-toggle-off: oklch(0.30 0.006 250);
+  --hud-titlebar-hover: oklch(0.18 0.004 250);
 
-  --code-bg:       color-mix(in oklch, var(--fg) 8%, transparent);
-  --field:         color-mix(in oklch, var(--fg) 5%, var(--surface));
-  --track:         color-mix(in oklch, var(--bg) 55%, var(--surface));
+  /* Lines */
+  --hud-line: oklch(0.22 0.005 250);
+  --hud-line-2: oklch(0.24 0.005 250);
+  --hud-line-3: oklch(0.26 0.006 250);
+  --hud-line-4: oklch(0.28 0.005 250);
+  --hud-line-5: oklch(0.30 0.006 250);
+  --hud-line-6: oklch(0.32 0.006 250);
 
-  /* lines */
-  --border:        oklch(0.300 0.006 255);
-  --border-strong: oklch(0.365 0.007 255);
-  --border-focus:  oklch(0.78 var(--accent-c) var(--accent-h));
+  /* Text */
+  --hud-fg: oklch(0.92 0.005 250);
+  --hud-fg-hi: oklch(0.95 0.005 250);
+  --hud-fg-2: oklch(0.85 0.006 255);
+  --hud-fg-3: oklch(0.75 0.01 258);
+  --hud-fg-muted: oklch(0.62 0.012 258);
+  --hud-fg-dim: oklch(0.55 0.012 258);
+  --hud-fg-low: oklch(0.50 0.012 260);
+  --hud-fg-faint: oklch(0.42 0.01 260);
+  --hud-fg-ghost: oklch(0.38 0.008 255);
 
-  /* type colors */
-  --fg:            oklch(0.925 0.004 250);
-  --fg-2:          oklch(0.825 0.008 255);
-  --fg-muted:      oklch(0.700 0.013 258);
-  --fg-subtle:     oklch(0.545 0.016 262);
-  --fg-faint:      oklch(0.430 0.010 260);
+  /* Semantic */
+  --accent: oklch(0.80 0.15 75);
+  --accent-hover: oklch(0.87 0.13 75);
+  --accent-fg: oklch(0.22 0.05 75);
+  --accent-soft: color-mix(in oklab, var(--accent) 14%, transparent);
+  --telemetry: oklch(0.80 0.12 215);
+  --telemetry-text: oklch(0.85 0.10 215);
+  --ok: oklch(0.73 0.18 150);
+  --danger: oklch(0.71 0.17 22);
+  --danger-soft: color-mix(in oklab, var(--danger) 14%, transparent);
 
-  /* brand / accent — AMBER (EXFIL locked rule: amber = brand/active). */
-  --accent-h:      75;      /* amber */
-  --accent-c:      0.15;
-  --accent-a:      0.12;
-  --accent:        oklch(0.80 var(--accent-c) var(--accent-h));
-  --accent-hover:  oklch(0.87 max(0.02, calc(var(--accent-c) - 0.02)) var(--accent-h));
-  --accent-active: oklch(0.72 var(--accent-c) var(--accent-h));
-  --accent-fg:     oklch(0.25 0.05 var(--accent-h));
-  --accent-soft:   oklch(0.80 var(--accent-c) var(--accent-h) / var(--accent-a));
-  --ghost-border:  oklch(0.80 var(--accent-c) var(--accent-h) / calc(var(--accent-a) * 2.9));
-  --ring:          oklch(0.80 var(--accent-c) var(--accent-h) / calc(var(--accent-a) * 3.75));
+  /* Preset accent cycle (palette-by-index, see api.ts slotAccent) */
+  --slot-normal: oklch(0.70 0.013 258);
+  --slot-a: oklch(0.80 0.15 75);
+  --slot-b: oklch(0.62 0.16 270);
+  --slot-c: oklch(0.72 0.17 25);
+  --slot-d: oklch(0.78 0.13 180);
+  --slot-e: oklch(0.66 0.16 320);
+  --slot-f: oklch(0.80 0.15 130);
 
-  /* cyan = ambient telemetry (EXFIL rule) */
-  --telemetry:     oklch(0.80 0.12 215);
+  /* Shape + motion */
+  --hud-r: 3px;
+  --hud-r-sm: 2px;
+  --ease-hud: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* preset accents — Normal is fixed neutral grey; user presets cycle a
-     6-hue palette keyed by index (see api.ts slotAccent / ACCENT_CYCLE). */
-  --slot-normal:   oklch(0.70 0.013 258);   /* neutral grey for baseline */
-  --slot-a:        oklch(0.80 0.15 75);      /* amber  */
-  --slot-b:        oklch(0.62 0.16 270);     /* indigo */
-  --slot-c:        oklch(0.72 0.17 25);      /* coral  */
-  --slot-d:        oklch(0.78 0.13 180);     /* teal   */
-  --slot-e:        oklch(0.66 0.16 320);     /* violet */
-  --slot-f:        oklch(0.80 0.15 130);     /* green  */
+  /* Type */
+  --font-display: "Chakra Petch", "IBM Plex Sans", system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  /* status semantics */
-  --ok:            oklch(0.73 0.18 150);
-  --ok-soft:       oklch(0.73 0.18 150 / 0.14);
-  --warn:          oklch(0.78 0.16 70);
-  --warn-soft:     oklch(0.78 0.16 70 / 0.14);
-  --danger:        oklch(0.71 0.17 22);
-  --danger-soft:   oklch(0.71 0.17 22 / 0.14);
-
-  /* shape */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius:    8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --r-card:    12px;
-
-  /* shadow */
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
-  --shadow:    0 4px 14px oklch(0 0 0 / 0.45);
-  --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.60);
-
-  /* motion */
-  --ease-page: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-fast:  140ms;
-  --dur-base:  240ms;
-
-  /* type system */
-  --font-ui:  "Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono:"JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
-  --titlebar-h: 34px;
-  --rail-w: 168px;
-  --fs-xs: 11px;
-  --fs-sm: 12px;
-  --fs-md: 13px;
-  --fs-lg: 15px;
-  --fs-xl: 18px;
-  --fs-2xl: 22px;
-  --fs-hero: 30px;
-
-  color-scheme: dark;
+  /* Grid texture overlay (toggle in Settings → General) */
+  --hud-grid: linear-gradient(oklch(1 0 0 / 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(1 0 0 / 0.025) 1px, transparent 1px);
 }
 
-/* ─── Reset + base ─── */
-* { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; }
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
 body {
+  margin: 0;
+  height: 100%;
+  background: var(--hud-bg);
+  color: var(--hud-fg);
   font-family: var(--font-ui);
-  font-size: var(--fs-md);
-  font-feature-settings: "cv02","cv03","cv04","cv11","ss01";
-  background:
-    radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%),
-    var(--bg);
-  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.4;
   -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  letter-spacing: -0.005em;
-}
-.mono { font-family: var(--font-mono); font-feature-settings: normal; letter-spacing: 0; }
-
-/* scrollbars */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); background-clip: padding-box; }
-::-webkit-scrollbar-track { background: transparent; }
-::selection { background: var(--accent-soft); color: var(--fg); }
-
-/* ─── primitives ─── */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  height: 30px; padding: 0 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--fg);
-  font: inherit; font-size: var(--fs-sm);
-  cursor: pointer;
-  transition: background 100ms ease, border-color 100ms ease, box-shadow 120ms ease, transform 80ms ease, color 100ms ease;
+  overflow: hidden;
   user-select: none;
-}
-.btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-.btn:active { background: var(--surface-active); transform: translateY(1px); }
-.btn:disabled { cursor: not-allowed; opacity: 0.5; }
-.btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
-.btn.primary:hover { background: var(--accent-hover); box-shadow: 0 4px 14px color-mix(in oklab, var(--accent) 22%, transparent); }
-.btn.ghost { background: transparent; border-color: transparent; color: var(--fg-muted); }
-.btn.ghost:hover { background: var(--surface-hover); color: var(--fg); }
-.btn.danger { color: var(--danger); border-color: var(--border); }
-.btn.danger:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
-.btn.sm { height: 24px; padding: 0 9px; font-size: var(--fs-xs); }
-
-.field-label {
-  display: block;
-  font-size: var(--fs-xs);
-  color: var(--fg-muted);
-  margin-bottom: 6px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-.card {
-  background: var(--bg-elev-1);
-  border: 1px solid var(--border);
-  border-radius: var(--r-card);
-  box-shadow: var(--shadow-sm);
-}
-
-/* app drag region (custom titlebar) */
-.drag { -webkit-app-region: drag; app-region: drag; }
-.no-drag { -webkit-app-region: no-drag; app-region: no-drag; }
-
-/* ── Rail menus (shared by the preset and crosshair rails) ──
-   Right-click context menu + the "Add ▾" popover, glass-panel style. */
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  background: transparent;
-  border: none;
-  padding: 0;
   cursor: default;
 }
-.ctxmenu,
-.add-menu {
-  z-index: 50;
-  padding: 5px;
+button,
+input,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: default;
+}
+input,
+textarea {
+  user-select: text;
+  cursor: text;
+}
+:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.display {
+  font-family: var(--font-display);
+}
+
+/* Scrollbars — 8px, quiet */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.30 0.006 255);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.38 0.008 255);
+}
+
+/* ── Drag regions (frameless window) ───────────────────────────────────────── */
+.drag {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Keyframes (one family, one easing) ────────────────────────────────────── */
+@keyframes hud-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes hud-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes hud-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+@keyframes hud-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes hud-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes hud-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes hud-shimmer {
+  0%,
+  100% {
+    background-color: oklch(0.16 0.004 250);
+  }
+  50% {
+    background-color: oklch(0.20 0.004 250);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Shared primitives ─────────────────────────────────────────────────────── */
+
+/* Chip: 22px outline action (RENAME / DUPLICATE / DELETE / COPY …) */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--hud-r-sm);
+  border: 1px solid var(--hud-line-4);
+  background: transparent;
+  color: var(--hud-fg-3);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition:
+    border-color 140ms var(--ease-hud),
+    color 140ms var(--ease-hud),
+    background 140ms var(--ease-hud),
+    box-shadow 140ms var(--ease-hud);
+}
+.chip:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--hud-fg);
+}
+.chip:disabled {
+  opacity: 0.4;
+}
+.chip.danger {
+  color: var(--danger);
+}
+.chip.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.chip.danger.armed {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 0 14px color-mix(in oklab, var(--danger) 35%, transparent);
+}
+.chip.accent {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 700;
+}
+.chip.accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-fg);
+}
+.chip.lg {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+.chip.tall {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+.chip.xs {
+  height: 20px;
+  padding: 0 6px;
+  font-size: 9.5px;
+}
+.chip.dim {
+  color: var(--hud-fg-faint);
+}
+
+/* Toggle: 28×14 */
+.toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: var(--hud-r-sm);
+  background: var(--hud-toggle-off);
+  transition: background 160ms var(--ease-hud);
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--hud-fg-muted);
+  transition:
+    left 180ms var(--ease-hud),
+    background 160ms var(--ease-hud);
+}
+.toggle.on {
+  background: var(--accent);
+}
+.toggle.on::after {
+  left: 16px;
+  background: var(--hud-bg);
+}
+
+/* Panel card */
+.panel {
+  border-radius: var(--hud-r);
+  background: var(--hud-panel);
+  border: 1px solid var(--hud-line-2);
+}
+
+/* Section label */
+.sec-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hud-fg-low);
+}
+
+/* Text field (filter / code input) */
+.field {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--hud-r-sm);
+  border: 1px solid var(--hud-line-3);
+  background: var(--hud-field);
+  color: var(--hud-fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  outline: none;
+  transition: border-color 140ms var(--ease-hud);
+}
+.field::placeholder {
+  color: var(--hud-fg-faint);
+}
+.field:focus {
+  border-color: var(--accent);
+}
+
+/* Modal backdrop */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  padding: 0;
+  border: none;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(2px);
+  cursor: default;
+  animation: hud-fade 160ms var(--ease-hud);
+}
+.backdrop.clear {
+  background: transparent;
+  backdrop-filter: none;
+  animation: none;
+}
+
+/* Dropdown menu (strip + NEW, select pills) */
+.menu {
+  position: absolute;
+  z-index: 70;
+  min-width: 180px;
+  padding: 4px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  background: linear-gradient(180deg, var(--bg-elev-3), var(--bg-elev-2));
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 color-mix(in oklab, white 5%, transparent);
-  animation: ctx-in 110ms var(--ease-soft);
+  gap: 1px;
+  background: oklch(0.14 0.004 250);
+  border: 1px solid var(--hud-line-5);
+  border-radius: var(--hud-r);
+  box-shadow: 0 20px 50px oklch(0 0 0 / 0.65);
+  animation: hud-in 140ms var(--ease-hud);
 }
-.ctxmenu { position: fixed; width: 180px; transform-origin: top left; }
-.add-menu { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; }
-/* Programmatic container focus (focusOnMount) shouldn't draw the UA ring;
-   keyboard focus on the items themselves gets the app ring token. */
-.ctxmenu:focus,
-.add-menu:focus { outline: none; }
-@keyframes ctx-in {
-  from { opacity: 0; transform: scale(0.95) translateY(-3px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+.menu.fixed {
+  position: fixed;
 }
-.ctx-item {
+.menu:focus {
+  outline: none;
+}
+.menu-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   width: 100%;
-  padding: 7px 9px;
-  background: transparent;
+  padding: 7px 8px;
   border: none;
-  border-radius: var(--radius-sm);
-  color: var(--fg-2);
-  font: inherit;
-  font-size: var(--fs-sm);
+  border-radius: var(--hud-r-sm);
+  background: transparent;
+  color: var(--hud-fg-2);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   text-align: left;
-  cursor: pointer;
-  transition: background 110ms ease, color 110ms ease, transform 80ms ease;
+  white-space: nowrap;
+  transition:
+    background 120ms var(--ease-hud),
+    color 120ms var(--ease-hud);
 }
-.ctx-item svg { flex-shrink: 0; opacity: 0.8; transition: opacity 110ms ease; }
-.ctx-item:hover { background: var(--surface-hover); color: var(--fg); }
-.ctx-item:hover svg { opacity: 1; }
-.ctx-item:active { transform: scale(0.98); }
-.ctx-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-.ctx-item.danger:hover { background: var(--danger-soft); color: var(--danger); }
-.ctx-item:disabled { opacity: 0.4; cursor: not-allowed; }
-.ctx-item:disabled:hover { background: transparent; color: var(--fg-2); }
-.ctx-item.locked { color: var(--fg-faint); cursor: default; font-size: var(--fs-xs); }
-.ctx-item.locked:hover { background: transparent; color: var(--fg-faint); }
+.menu-item :global(svg),
+.menu-item svg {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.menu-item:hover:not(:disabled) {
+  background: oklch(0.18 0.004 250);
+  color: var(--hud-fg);
+}
+.menu-item:disabled {
+  color: var(--hud-fg-faint);
+}
+.menu-item.danger {
+  color: var(--danger);
+}
+.menu-item.danger:hover {
+  background: var(--danger-soft);
+}
+.menu-item.on {
+  color: var(--accent);
+}
+.menu-sep {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--hud-line);
+}

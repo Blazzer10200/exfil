@@ -110,15 +110,31 @@ export type UpdateMeta = { version: string; notes: string };
 export const checkUpdate = () => invoke<UpdateMeta | null>("check_update");
 export const installUpdate = () => invoke<void>("install_update");
 
+// Foreground program (lowercased exe basename) or null for desktop / shell /
+// EXFIL itself. The backend also emits "in-front" with the same payload
+// whenever it changes.
+export const getInFront = () => invoke<string | null>("get_in_front");
+
+// Primary monitor as the previews label it ("DISPLAY1", physical size).
+export type MonitorInfo = { name: string; width: number; height: number };
+export const primaryMonitor = () => invoke<MonitorInfo | null>("primary_monitor");
+
 // ── Crosshairs ── (mirrors src-tauri/src/crosshair.rs; ranges are clamped backend-side)
+/** Inner-line shapes (crosshair.rs SHAPE_*). */
+export const SHAPES = ["Cross", "X", "T", "Chevron", "Brackets"] as const;
 export type CrosshairStyle = {
   color: string; // "#rrggbb"
   opacity: number; // 0.1..1
-  arms: boolean;
+  arms: boolean; // inner lines
+  shape: number; // 0 cross · 1 x · 2 t · 3 chevron · 4 brackets
   length: number; // 1..40 px
   thickness: number; // 1..10 px
   gap: number; // 0..30 px
-  t_style: boolean; // hide the top arm
+  outer: boolean; // outer lines
+  outer_length: number; // 1..40
+  outer_thickness: number; // 1..10
+  outer_gap: number; // 0..60 from center
+  outer_opacity: number; // 0.1..1
   dot: boolean;
   dot_size: number; // 1..10 px
   ring: boolean;
@@ -127,8 +143,42 @@ export type CrosshairStyle = {
   outline: boolean;
   outline_thickness: number; // 1..3 px
   outline_color: string;
+  glow: boolean;
+  glow_radius: number; // 0..8 px
   offset_x: number; // -50..50 px on-screen nudge
   offset_y: number;
+  monitor: string; // "primary"
+  scale_with_resolution: boolean; // px authored at 1440p, scaled to the monitor
+};
+
+/** Backend defaults (crosshair.rs `Default`) — the "Blank" starting point. */
+export const DEFAULT_STYLE: CrosshairStyle = {
+  color: "#00ff66",
+  opacity: 1,
+  arms: true,
+  shape: 0,
+  length: 6,
+  thickness: 2,
+  gap: 3,
+  outer: false,
+  outer_length: 3,
+  outer_thickness: 1,
+  outer_gap: 13,
+  outer_opacity: 0.7,
+  dot: false,
+  dot_size: 2,
+  ring: false,
+  ring_radius: 10,
+  ring_thickness: 1,
+  outline: true,
+  outline_thickness: 1,
+  outline_color: "#000000",
+  glow: false,
+  glow_radius: 3,
+  offset_x: 0,
+  offset_y: 0,
+  monitor: "primary",
+  scale_with_resolution: false,
 };
 
 export type Crosshair = {

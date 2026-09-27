@@ -46,10 +46,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRES
 
 /// Start the overlay thread. `resolve(fg_exe)` returns the style to draw for
 /// the current foreground program (None = hide); `fg_exe` is None when the
-/// foreground window is EXFIL itself or its exe is unknown. Idempotent.
-pub fn start<F>(resolve: F)
+/// foreground window is EXFIL itself or its exe is unknown. `on_front(exe)`
+/// fires whenever the foreground exe changes (None = desktop / EXFIL / shell)
+/// so the UI can show what's in front. Idempotent.
+pub fn start<F, G>(resolve: F, on_front: G)
 where
     F: Fn(Option<&str>) -> Option<CrosshairStyle> + Send + 'static,
+    G: Fn(Option<String>) + Send + 'static,
 {
     if OVERLAY_RUNNING.swap(true, Ordering::SeqCst) {
         return;
@@ -61,13 +64,40 @@ where
             let _ = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         }
         match unsafe { create_window() } {
-            Ok(hwnd) => run(hwnd, resolve),
+            Ok(hwnd) => run(hwnd, resolve, on_front),
             Err(e) => {
                 log::warn!("crosshair overlay unavailable: {e}");
                 OVERLAY_RUNNING.store(false, Ordering::SeqCst);
             }
         }
     });
+}
+
+/// Primary monitor height in physical pixels (for scale-with-resolution).
+fn primary_height() -> Option<i32> {
+    unsafe {
+        let primary = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetMonitorInfoW(primary, &mut mi).as_bool() {
+            let h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+            if h > 0 {
+                return Some(h);
+            }
+        }
+        None
+    }
+}
+
+/// Crosshair pixel sizes are authored at 1440p; scale them to the primary
+/// monitor when the style asks for it.
+fn effective_style(st: &CrosshairStyle) -> CrosshairStyle {
+    if !st.scale_with_resolution {
+        return st.clone();
+    }
+    match primary_height() {
+        Some(h) => st.scaled(h as f32 / 1440.0),
+        None => st.clone(),
+    }
 }
 
 unsafe fn create_window() -> windows::core::Result<HWND> {
@@ -99,14 +129,16 @@ unsafe fn create_window() -> windows::core::Result<HWND> {
     )
 }
 
-fn run<F>(hwnd: HWND, resolve: F)
+fn run<F, G>(hwnd: HWND, resolve: F, on_front: G)
 where
     F: Fn(Option<&str>) -> Option<CrosshairStyle>,
+    G: Fn(Option<String>),
 {
     let own_pid = unsafe { GetCurrentProcessId() };
     // Foreground pid → exe, refreshed when the pid changes (and every few
     // seconds, in case a just-launched process wasn't in the first snapshot).
     let mut exe_cache: Option<(u32, Option<String>, Instant)> = None;
+    let mut announced: Option<Option<String>> = None;
     let mut bitmap: Option<(CrosshairStyle, Bitmap)> = None;
     let mut drawn: Option<(CrosshairStyle, i32, i32)> = None;
     let mut visible = false;
@@ -126,12 +158,18 @@ where
             None => true,
         };
         if stale {
-            let exe = if pid == 0 || own { None } else { watcher::exe_for_pid(pid) };
+            let exe = if pid == 0 || own || is_shell(fg) { None } else { watcher::exe_for_pid(pid) };
             exe_cache = Some((pid, exe, Instant::now()));
         }
         let exe = exe_cache.as_ref().and_then(|(_, e, _)| e.as_deref());
+        let front = if own { None } else { exe.map(str::to_string) };
+        if announced.as_ref() != Some(&front) {
+            on_front(front.clone());
+            announced = Some(front);
+        }
 
         let target = resolve(if own { None } else { exe })
+            .map(|st| effective_style(&st))
             .and_then(|st| anchor(fg, own).map(|c| (st, c)));
 
         match target {
