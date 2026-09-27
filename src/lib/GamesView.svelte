@@ -106,7 +106,7 @@
 </div>
 
 {#if picker}
-  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, t) => void app.createPresetFromGame(exe, t)} onclose={() => (picker = false)} {boundTo} />
+  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, t) => void app.createPresetFromGame(exe, t)} onclose={() => (picker = false)} {boundTo} boundHint="opens it" />
 {/if}
 
 <style>

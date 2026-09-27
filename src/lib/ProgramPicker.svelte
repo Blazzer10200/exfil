@@ -14,10 +14,12 @@
     sub: string;
     onpick: (exe: string, title: string) => void;
     onclose: () => void;
-    /** Name of whatever this exe is already bound to (shows "→ X · will rebind"). */
+    /** Name of whatever this exe is already bound to (shows "→ X · <boundHint>"). */
     boundTo?: (exe: string) => string | null;
+    /** What picking an already-bound exe does. */
+    boundHint?: string;
   }
-  let { heading = "BIND PROGRAM", sub, onpick, onclose, boundTo }: Props = $props();
+  let { heading = "BIND PROGRAM", sub, onpick, onclose, boundTo, boundHint = "will rebind" }: Props = $props();
 
   let procs = $state<WindowProc[]>([]);
   let filter = $state("");
@@ -89,7 +91,7 @@
           <span class="dot" class:front={p.exe === app.inFront}></span>
           <span class="text">
             <span class="t">{p.title}</span>
-            <span class="e mono">{p.exe}{#if bound}<span class="rebind"> → {bound.toUpperCase()} · will rebind</span>{/if}</span>
+            <span class="e mono">{p.exe}{#if bound}<span class="rebind"> → {bound.toUpperCase()} · {boundHint}</span>{/if}</span>
           </span>
         </button>
       {:else}

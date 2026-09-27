@@ -2,6 +2,17 @@
 
 All notable changes to EXFIL. Earlier releases are described in their git tags.
 
+## [2.5.1] — 2026-09-26
+
+### Fixed
+- **Crosshair centering.** The center dot and outer lines now sit exactly on the
+  main stroke's center even when their pixel width has the opposite parity
+  (a 2px dot on 1px arms, 1px outer lines on 2px arms). Before, they snapped a
+  whole pixel right/down and looked off-center.
+- **"From running program"** on a game that already has a crosshair or preset
+  now opens the existing one instead of creating a stock duplicate that silently
+  took over the binding, leaving your tuned crosshair unbound.
+
 ## [2.5.0] — 2026-09-26
 
 ### Changed

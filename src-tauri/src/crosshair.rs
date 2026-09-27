@@ -229,13 +229,36 @@ impl Layers {
 
     /// Filled rect plus its outline (the rect grown by `o` on every side).
     fn solid(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, o: i32) {
-        self.solid_a(x0, y0, x1, y1, o, 1.0);
-    }
-
-    fn solid_a(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, o: i32, a: f32) {
-        Self::rect(&mut self.fill, self.size, x0, y0, x1, y1, a);
+        Self::rect(&mut self.fill, self.size, x0, y0, x1, y1, 1.0);
         if o > 0 {
             Self::rect(&mut self.outline, self.size, x0 - o, y0 - o, x1 + o, y1 + o, 1.0);
+        }
+    }
+
+    /// Box with fractional edges: each pixel gets its covered area. Integer
+    /// edges reproduce `rect` exactly; half-pixel edges split the coverage
+    /// evenly on both sides, so an element whose width parity doesn't match
+    /// the primary stroke stays centered on it instead of snapping right/down.
+    fn rect_f(buf: &mut [f32], size: i32, x0: f32, y0: f32, x1: f32, y1: f32, a: f32) {
+        let (px0, py0) = (x0.floor() as i32, y0.floor() as i32);
+        let (px1, py1) = (x1.ceil() as i32, y1.ceil() as i32);
+        for py in py0.max(0)..py1.min(size) {
+            let cy = (y1.min(py as f32 + 1.0) - y0.max(py as f32)).max(0.0);
+            for px in px0.max(0)..px1.min(size) {
+                let cx = (x1.min(px as f32 + 1.0) - x0.max(px as f32)).max(0.0);
+                if let Some(c) = buf.get_mut((py * size + px) as usize) {
+                    *c = c.max(a * cx * cy);
+                }
+            }
+        }
+    }
+
+    /// `solid` for a box centered on an arbitrary point (secondary elements:
+    /// dot, outer lines), with per-element opacity `a`.
+    fn solid_f(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, o: f32, a: f32) {
+        Self::rect_f(&mut self.fill, self.size, x0, y0, x1, y1, a);
+        if o > 0.0 {
+            Self::rect_f(&mut self.outline, self.size, x0 - o, y0 - o, x1 + o, y1 + o, 1.0);
         }
     }
 
@@ -425,23 +448,26 @@ pub fn render(style: &CrosshairStyle) -> Bitmap {
             }
         }
     }
+    // Secondary elements sit on the primary's center `c` exactly. When their
+    // width parity matches the primary they're pixel-crisp; when it doesn't,
+    // the half-pixel of coverage is split across both edges (symmetric, never
+    // shifted a whole pixel to one side).
     if s.outer {
-        let (a, b) = span(c, s.outer_thickness);
-        let (g, l) = (s.outer_gap as i32, s.outer_length as i32);
+        let ht = s.outer_thickness as f32 / 2.0;
+        let (a, b) = (c - ht, c + ht);
+        let (g, l) = (s.outer_gap as f32, s.outer_length as f32);
         let op = s.outer_opacity;
-        layers.solid_a(b + g, a, b + g + l, b, oi, op);
-        layers.solid_a(a - g - l, a, a - g, b, oi, op);
-        layers.solid_a(a, b + g, b, b + g + l, oi, op);
-        layers.solid_a(a, a - g - l, b, a - g, oi, op);
+        layers.solid_f(b + g, a, b + g + l, b, of, op);
+        layers.solid_f(a - g - l, a, a - g, b, of, op);
+        layers.solid_f(a, b + g, b, b + g + l, of, op);
+        layers.solid_f(a, a - g - l, b, a - g, of, op);
     }
     if s.dot {
-        let (a, b) = span(c, s.dot_size);
-        layers.solid(a, a, b, b, oi);
+        let hd = s.dot_size as f32 / 2.0;
+        layers.solid_f(c - hd, c - hd, c + hd, c + hd, of, 1.0);
     }
     if s.ring {
-        let (a, b) = span(c, primary);
-        let rc = (a + b) as f32 / 2.0;
-        layers.ring(rc, rc, s.ring_radius as f32, s.ring_thickness as f32, of);
+        layers.ring(c, c, s.ring_radius as f32, s.ring_thickness as f32, of);
     }
 
     let glow = if glow_r > 0 {
@@ -807,6 +833,31 @@ mod tests {
         let alpha_at = |x: i32| b.rgba[(((h * b.size as i32) + h + x) * 4 + 3) as usize];
         assert_eq!(alpha_at(14), 128); // outer arm at half opacity
         assert_eq!(alpha_at(5), 255); // inner arm full
+    }
+
+    #[test]
+    fn mismatched_parity_dot_and_outer_lines_stay_centered() {
+        // 1px arms (center on a pixel middle) + 2px dot: the dot must be
+        // symmetric around the arm column, not hang one pixel to the right.
+        let st = CrosshairStyle { thickness: 1, gap: 4, length: 5, dot: true, dot_size: 2, outline: false, ..Default::default() };
+        let b = render(&st);
+        let h = b.half as i32;
+        let alpha_at = |x: i32, y: i32| b.rgba[((((h + y) * b.size as i32) + h + x) * 4 + 3) as usize];
+        assert_eq!(alpha_at(0, 0), 255); // arm column / dot center
+        assert_eq!(alpha_at(-1, 0), alpha_at(1, 0));
+        assert_eq!(alpha_at(0, -1), alpha_at(0, 1));
+        assert!(alpha_at(-1, 0) > 0 && alpha_at(2, 0) == 0);
+
+        // 2px arms (center on the boundary) + 1px outer lines: the outer line
+        // straddles the boundary evenly instead of sitting below it.
+        let st = CrosshairStyle { thickness: 2, outer: true, outer_thickness: 1, outer_gap: 12, outer_length: 3, outer_opacity: 0.7, outline: false, ..Default::default() };
+        let b = render(&st);
+        let h = b.half as i32;
+        let alpha_at = |x: i32, y: i32| b.rgba[((((h + y) * b.size as i32) + h + x) * 4 + 3) as usize];
+        assert_eq!(alpha_at(14, -1), alpha_at(14, 0));
+        assert!(alpha_at(14, 0) > 0);
+        assert_eq!(alpha_at(14, 1), 0);
+        assert_eq!(alpha_at(14, -2), 0);
     }
 
     #[test]

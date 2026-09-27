@@ -448,7 +448,7 @@
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 {#if picker === "create"}
-  <ProgramPicker sub="A new crosshair named after the game, bound to it" onpick={(exe, title) => void app.createCrosshair(title.trim() || exe, null, exe)} onclose={() => (picker = null)} {boundTo} />
+  <ProgramPicker sub="A new crosshair named after the game, bound to it" onpick={(exe, title) => void app.createCrosshair(title.trim() || exe, null, exe)} onclose={() => (picker = null)} {boundTo} boundHint="opens it" />
 {:else if picker === "bind" && sel}
   <ProgramPicker sub="Switches {sel.name} in while this program is in front" onpick={(exe) => void app.bindCrosshair(sel.id, exe)} onclose={() => (picker = null)} {boundTo} />
 {/if}

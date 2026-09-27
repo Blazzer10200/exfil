@@ -185,7 +185,7 @@
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 {#if picker === "create"}
-  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, title) => void app.createPresetFromGame(exe, title)} onclose={() => (picker = null)} {boundTo} />
+  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, title) => void app.createPresetFromGame(exe, title)} onclose={() => (picker = null)} {boundTo} boundHint="opens it" />
 {:else if picker === "bind"}
   <ProgramPicker sub="Auto-applies {app.current?.name ?? ''} while this program runs" onpick={(exe) => void app.bindPreset(app.active, exe)} onclose={() => (picker = null)} {boundTo} />
 {/if}

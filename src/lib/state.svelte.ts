@@ -259,6 +259,12 @@ class AppStore {
   /** New preset named after a running game, bound to it in one action. */
   async createPresetFromGame(exe: string, title: string) {
     if (this.busy) return;
+    const bound = this.presets.find((p) => p.exe === exe);
+    if (bound) {
+      await this.pickPreset(bound.slot);
+      toast.info(`↳ ALREADY BOUND · ${bound.name.toUpperCase()}`);
+      return;
+    }
     this.busy = true;
     try {
       const name = title.trim() || exe;
@@ -354,6 +360,15 @@ class AppStore {
   }
 
   async createCrosshair(name: string, style: CrosshairStyle | null, exe: string | null = null) {
+    // "From running program" on a game that already has a crosshair: open
+    // that one. Minting a fresh default and stealing the binding would leave
+    // the tuned crosshair orphaned and a stock one showing in the game.
+    const bound = exe ? this.crosshairs.find((c) => c.exe === exe) : undefined;
+    if (bound) {
+      await this.pickCrosshair(bound.id);
+      toast.info(`↳ ALREADY BOUND · ${bound.name.toUpperCase()}`);
+      return bound;
+    }
     try {
       let c = await createCrosshair(name, style);
       if (exe) {
