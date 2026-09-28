@@ -2,6 +2,15 @@
 
 All notable changes to EXFIL. Earlier releases are described in their git tags.
 
+## [Unreleased]
+
+### Fixed
+- **White box / hung app on start-with-Windows.** The main window was created
+  visible and only hidden at the end of startup, and the tray popup webview was
+  built inline, so a slow WebView2 at boot stalled startup with an empty white
+  window on screen. The window now starts hidden (`"visible": false`) and the
+  tray popup is built on its own thread.
+
 ## [2.5.1] — 2026-09-26
 
 ### Fixed

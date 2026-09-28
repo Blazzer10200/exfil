@@ -751,25 +751,37 @@ pub fn run() {
             // match the app. The popup window is frameless/transparent/always-on-
             // top, shown at the cursor on tray click, hidden on focus loss; its
             // items invoke `tray_action`.
-            let tray_menu = WebviewWindowBuilder::new(app, "tray", WebviewUrl::App("tray".into()))
-                .title("EXFIL menu")
-                .inner_size(224.0, 200.0)
-                .resizable(false)
-                .maximizable(false)
-                .minimizable(false)
-                .decorations(false)
-                .transparent(true)
-                .shadow(false)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .visible(false)
-                .focused(false)
-                .build()?;
+            // Built on its own thread: at boot WebView2 can be slow to start, and
+            // building it inline made `setup` stall before the main window was
+            // hidden (white box, app not responding). The tray click handler
+            // already tolerates the window not existing yet.
             {
-                let w = tray_menu.clone();
-                tray_menu.on_window_event(move |event| {
-                    if let WindowEvent::Focused(false) = event {
-                        let _ = w.hide();
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let built = WebviewWindowBuilder::new(&handle, "tray", WebviewUrl::App("tray".into()))
+                        .title("EXFIL menu")
+                        .inner_size(224.0, 200.0)
+                        .resizable(false)
+                        .maximizable(false)
+                        .minimizable(false)
+                        .decorations(false)
+                        .transparent(true)
+                        .shadow(false)
+                        .always_on_top(true)
+                        .skip_taskbar(true)
+                        .visible(false)
+                        .focused(false)
+                        .build();
+                    match built {
+                        Ok(tray_menu) => {
+                            let w = tray_menu.clone();
+                            tray_menu.on_window_event(move |event| {
+                                if let WindowEvent::Focused(false) = event {
+                                    let _ = w.hide();
+                                }
+                            });
+                        }
+                        Err(e) => log::warn!("tray menu window failed to build: {e}"),
                     }
                 });
             }
