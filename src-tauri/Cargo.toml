@@ -8,7 +8,9 @@ edition = "2021"
 
 [lib]
 name = "exfil_v2_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: desktop-only app (no mobile target). The template's staticlib +
+# cdylib made every debug build emit and link two extra ~0.9 GB artifacts.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -45,3 +47,20 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Iteration build: no fat LTO, 16 codegen units, incremental. Ship builds keep
+# [profile.release]. Use: npx @tauri-apps/cli build --no-bundle -- --profile release-fast
+# -> C:\cargo-targets\release-fast\exfil-v2.exe
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+
+# Dev-loop speed: line tables only for own code, no debuginfo for dependencies
+# (smaller PDBs, faster link). `cargo test` inherits this profile.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

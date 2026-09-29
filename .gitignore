@@ -30,3 +30,5 @@ HANDOFF-ARCHIVE-*.md
 # Internal working docs — local only
 /CLAUDE.md
 /AGENTS.md
+/docs/GOTCHAS.md
+/.ignore
