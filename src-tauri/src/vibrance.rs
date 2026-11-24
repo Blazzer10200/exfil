@@ -15,6 +15,38 @@ pub struct VibranceInfo {
     pub default: i32,
 }
 
+/// Run `apply` on every display. Every display is attempted even if an earlier
+/// one fails; the result is the last error, or an error when there are no
+/// displays at all (`none` names the vendor in that message).
+pub(crate) fn for_each_display<D>(
+    displays: Vec<D>,
+    none: &str,
+    mut apply: impl FnMut(D) -> Result<(), String>,
+) -> Result<(), String> {
+    if displays.is_empty() {
+        return Err(none.into());
+    }
+    let mut last_err = None;
+    for d in displays {
+        if let Err(e) = apply(d) {
+            last_err = Some(e);
+        }
+    }
+    last_err.map_or(Ok(()), Err)
+}
+
+/// Clamp a level into a driver-reported range. A driver that reports an
+/// inverted range is an error, not a panic (`i32::clamp` would abort the app).
+pub(crate) fn clamp_level(level: i32, info: &VibranceInfo) -> Result<i32, String> {
+    if info.min > info.max {
+        return Err(format!(
+            "driver reported an invalid vibrance range {}..{}",
+            info.min, info.max
+        ));
+    }
+    Ok(level.clamp(info.min, info.max))
+}
+
 pub enum Vibrance {
     Nvidia(Nvapi),
     Amd(Adl),

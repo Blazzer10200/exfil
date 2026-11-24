@@ -64,7 +64,11 @@ fn next_slot(state: &AppState) -> Option<String> {
     if s.presets.len() < 2 {
         return None;
     }
-    let idx = s.presets.iter().position(|p| p.slot == s.active).unwrap_or(0);
+    let idx = s
+        .presets
+        .iter()
+        .position(|p| p.slot == s.active)
+        .unwrap_or(0);
     Some(s.presets[(idx + 1) % s.presets.len()].slot.clone())
 }
 

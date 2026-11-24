@@ -1,26 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main EXFIL window + tray menu popup",
-  "windows": ["main", "tray"],
+  "description": "What the frontend may call directly: window chrome (drag, minimize, hide, resize), events, app version and the open/save dialogs. Everything else goes through the app's own commands.",
+  "windows": [
+    "main",
+    "tray"
+  ],
   "permissions": [
     "core:app:default",
     "core:event:default",
-    "core:path:default",
-    "core:webview:default",
     "core:window:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-hide",
-    "core:window:allow-show",
-    "core:window:allow-set-focus",
     "core:window:allow-set-size",
-    "core:menu:default",
-    "core:tray:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save"
   ]

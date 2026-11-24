@@ -5,10 +5,10 @@ use tauri::{AppHandle, State};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::gamma::ColorDials;
+use crate::process;
 use crate::state::{lock, AppState};
 use crate::store::{Preset, PresetStore, NORMAL_SLOT};
 use crate::vibrance::VibranceInfo;
-use crate::watcher;
 
 #[derive(serde::Serialize)]
 pub struct SystemStatus {
@@ -55,7 +55,7 @@ pub fn save_preset(
         return Err("Normal baseline is read-only".into());
     }
     let mut s = lock(&state.store);
-    s.update(&slot, dials, vibrance);
+    s.update(&slot, dials, vibrance)?;
     s.save()
 }
 
@@ -64,13 +64,13 @@ pub fn save_preset(
 /// AMD's saturation scale 0 would seed a grayscale preset.
 #[tauri::command]
 pub fn create_preset(state: State<AppState>, name: String) -> Result<Preset, String> {
-    let default_vib = state.vibrance.as_ref().map(|v| v.default_level()).unwrap_or(0);
+    let neutral = state
+        .vibrance
+        .as_ref()
+        .map(|v| v.default_level())
+        .unwrap_or(0);
     let mut s = lock(&state.store);
-    let mut p = s.add(name);
-    if default_vib != 0 {
-        s.update(&p.slot, p.dials, default_vib);
-        p.vibrance = default_vib;
-    }
+    let p = s.add(name, ColorDials::default(), neutral);
     s.save()?;
     Ok(p)
 }
@@ -109,11 +109,11 @@ pub fn set_binding(
 }
 
 /// List programs that own a visible window, as {exe, title} pairs, for the binder.
-/// "Has a visible window" disambiguates same-named exes via the window title and
-/// needs no hardcoded denylist. Read-only enumeration — no injection.
+/// The window title disambiguates same-named exes. Read-only enumeration — no
+/// injection.
 #[tauri::command]
-pub fn list_window_programs() -> Vec<watcher::WindowProc> {
-    watcher::list_window_programs()
+pub fn list_window_programs() -> Vec<process::WindowProc> {
+    process::list_window_programs()
 }
 
 /// Export user presets (all but Normal) to a JSON file the user chose via the
@@ -145,7 +145,11 @@ pub fn get_autostart(state: State<AppState>) -> bool {
 /// Toggle start-with-Windows: flips the HKCU Run key and persists the choice
 /// so boot-time setup re-asserts it. Returns the new value.
 #[tauri::command]
-pub fn set_autostart(app: AppHandle, state: State<AppState>, enabled: bool) -> Result<bool, String> {
+pub fn set_autostart(
+    app: AppHandle,
+    state: State<AppState>,
+    enabled: bool,
+) -> Result<bool, String> {
     let al = app.autolaunch();
     let res = if enabled { al.enable() } else { al.disable() };
     res.map_err(|e| e.to_string())?;
@@ -183,7 +187,11 @@ pub fn primary_monitor(app: AppHandle) -> Option<MonitorInfo> {
     // "\\.\DISPLAY1" → "DISPLAY1"
     let name = raw.rsplit('\\').next().unwrap_or("DISPLAY1").to_string();
     let size = m.size();
-    Some(MonitorInfo { name, width: size.width, height: size.height })
+    Some(MonitorInfo {
+        name,
+        width: size.width,
+        height: size.height,
+    })
 }
 
 /// Open an https URL in the user's default browser (settings-page links).

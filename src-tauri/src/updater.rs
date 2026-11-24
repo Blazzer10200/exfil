@@ -15,7 +15,10 @@ pub struct UpdateMeta {
 
 impl From<&Update> for UpdateMeta {
     fn from(u: &Update) -> Self {
-        Self { version: u.version.clone(), notes: u.body.clone().unwrap_or_default() }
+        Self {
+            version: u.version.clone(),
+            notes: u.body.clone().unwrap_or_default(),
+        }
     }
 }
 

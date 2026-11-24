@@ -13,9 +13,7 @@
 //! NO DLL injection. All vibrance writes go through the NVIDIA display driver.
 //! BattlEye / EAC safe — this is the same path the Nvidia Control Panel uses.
 
-#![allow(non_snake_case)]
-
-use crate::vibrance::VibranceInfo;
+use crate::vibrance::{clamp_level, for_each_display, VibranceInfo};
 use std::os::raw::{c_int, c_void};
 
 type NvApiStatus = c_int; // 0 == NVAPI_OK
@@ -43,14 +41,17 @@ fn make_version<T>(ver: u32) -> u32 {
 type FnQueryInterface = unsafe extern "C" fn(u32) -> *mut c_void;
 type FnInitialize = unsafe extern "C" fn() -> NvApiStatus;
 type FnEnumDisplay = unsafe extern "C" fn(u32, *mut NvDisplayHandle) -> NvApiStatus;
-type FnGetDvcEx = unsafe extern "C" fn(NvDisplayHandle, u32, *mut NvDisplayDvcInfoEx) -> NvApiStatus;
-type FnSetDvcEx = unsafe extern "C" fn(NvDisplayHandle, u32, *mut NvDisplayDvcInfoEx) -> NvApiStatus;
+type FnGetDvcEx =
+    unsafe extern "C" fn(NvDisplayHandle, u32, *mut NvDisplayDvcInfoEx) -> NvApiStatus;
+type FnSetDvcEx =
+    unsafe extern "C" fn(NvDisplayHandle, u32, *mut NvDisplayDvcInfoEx) -> NvApiStatus;
 
 pub struct Nvapi {
     _lib: libloading::Library,
     query: FnQueryInterface,
-    initialized: bool,
 }
+
+const NO_DISPLAY: &str = "no NVIDIA display handle";
 
 impl Nvapi {
     /// Load nvapi64.dll, resolve QueryInterface, call NvAPI_Initialize.
@@ -60,20 +61,19 @@ impl Nvapi {
         // nvapi_QueryInterface is the single exported symbol; everything else
         // is resolved through it by ordinal.
         let query: FnQueryInterface = unsafe {
-            let sym: libloading::Symbol<FnQueryInterface> = lib.get(b"nvapi_QueryInterface\0").ok()?;
+            let sym: libloading::Symbol<FnQueryInterface> =
+                lib.get(b"nvapi_QueryInterface\0").ok()?;
             *sym
         };
-        let mut me = Nvapi { _lib: lib, query, initialized: false };
-        let init: FnInitialize = unsafe { std::mem::transmute((me.query)(0x0150_E828)) };
-        if (init as usize) == 0 {
-            return None;
-        }
+        let me = Nvapi { _lib: lib, query };
+        // resolve() null-checks before producing the fn pointer; a null fn
+        // pointer must never exist, even transiently.
+        let init: FnInitialize = me.resolve(0x0150_E828)?;
         let st = unsafe { init() };
         if st != NVAPI_OK {
             log::warn!("NvAPI_Initialize failed: {st}");
             return None;
         }
-        me.initialized = true;
         Some(me)
     }
 
@@ -114,7 +114,9 @@ impl Nvapi {
 
     /// Read vibrance for a specific display handle.
     fn get_vibrance_for(&self, display: NvDisplayHandle) -> Result<VibranceInfo, String> {
-        let get_fn: FnGetDvcEx = self.resolve(0x0E45_002D).ok_or("GetDVCInfoEx unavailable")?;
+        let get_fn: FnGetDvcEx = self
+            .resolve(0x0E45_002D)
+            .ok_or("GetDVCInfoEx unavailable")?;
         let mut info = NvDisplayDvcInfoEx {
             version: make_version::<NvDisplayDvcInfoEx>(1),
             current_level: 0,
@@ -136,9 +138,11 @@ impl Nvapi {
 
     /// Set vibrance for a specific display handle (clamped to its min/max).
     fn set_vibrance_for(&self, display: NvDisplayHandle, level: i32) -> Result<(), String> {
-        let set_fn: FnSetDvcEx = self.resolve(0x4A82_C2B1).ok_or("SetDVCLevelEx unavailable")?;
+        let set_fn: FnSetDvcEx = self
+            .resolve(0x4A82_C2B1)
+            .ok_or("SetDVCLevelEx unavailable")?;
         let cur = self.get_vibrance_for(display)?;
-        let clamped = level.clamp(cur.min, cur.max);
+        let clamped = clamp_level(level, &cur)?;
         let mut info = NvDisplayDvcInfoEx {
             version: make_version::<NvDisplayDvcInfoEx>(1),
             current_level: clamped,
@@ -156,7 +160,7 @@ impl Nvapi {
     /// Read current vibrance for the primary output, in the driver-reported
     /// scale (measured here: 0..=100 default 50 — not the "0..63" folklore).
     pub fn get_vibrance(&self) -> Result<VibranceInfo, String> {
-        let display = self.primary_display().ok_or("no NVIDIA display handle")?;
+        let display = self.primary_display().ok_or(NO_DISPLAY)?;
         self.get_vibrance_for(display)
     }
 
@@ -164,46 +168,18 @@ impl Nvapi {
     /// This is the correct path for presets — otherwise monitor 2 keeps a stale value
     /// and shows a visibly different color from monitor 1.
     pub fn set_vibrance(&self, level: i32) -> Result<(), String> {
-        let displays = self.all_displays();
-        if displays.is_empty() {
-            return Err("no NVIDIA display handle".into());
-        }
-        let mut last_err = None;
-        for d in displays {
-            if let Err(e) = self.set_vibrance_for(d, level) {
-                last_err = Some(e);
-            }
-        }
-        match last_err {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
+        for_each_display(self.all_displays(), NO_DISPLAY, |d| {
+            self.set_vibrance_for(d, level)
+        })
     }
 
     /// Restore every connected NVIDIA output to its OWN native default vibrance.
     /// This is what "Normal" uses so each monitor picks up the color Windows/the
     /// driver natively programmed for it, instead of a shared forced level.
     pub fn reset_vibrance_to_default(&self) -> Result<(), String> {
-        let displays = self.all_displays();
-        if displays.is_empty() {
-            return Err("no NVIDIA display handle".into());
-        }
-        let mut last_err = None;
-        for d in displays {
-            let default = match self.get_vibrance_for(d) {
-                Ok(info) => info.default,
-                Err(e) => {
-                    last_err = Some(e);
-                    continue;
-                }
-            };
-            if let Err(e) = self.set_vibrance_for(d, default) {
-                last_err = Some(e);
-            }
-        }
-        match last_err {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
+        for_each_display(self.all_displays(), NO_DISPLAY, |d| {
+            let default = self.get_vibrance_for(d)?.default;
+            self.set_vibrance_for(d, default)
+        })
     }
 }

@@ -11,8 +11,8 @@ use tauri::{
     WindowEvent,
 };
 
-use crate::state::AppState;
 use crate::show_main_window;
+use crate::state::AppState;
 
 const TRAY_WINDOW: &str = "tray";
 
@@ -35,12 +35,18 @@ pub fn setup(app: &App) -> tauri::Result<()> {
             // Any click (left or right) → menu popup just above the cursor.
             // "tray-open" replays the entrance animation + refreshes the
             // readout; focus loss hides it again.
-            let TrayIconEvent::Click { button_state: MouseButtonState::Up, position, .. } = event
+            let TrayIconEvent::Click {
+                button_state: MouseButtonState::Up,
+                position,
+                ..
+            } = event
             else {
                 return;
             };
             let app = tray.app_handle();
-            let Some(w) = app.get_webview_window(TRAY_WINDOW) else { return };
+            let Some(w) = app.get_webview_window(TRAY_WINDOW) else {
+                return;
+            };
             if let Ok(size) = w.outer_size() {
                 let x = (position.x - size.width as f64).max(8.0);
                 let y = (position.y - size.height as f64 - 8.0).max(8.0);

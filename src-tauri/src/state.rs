@@ -34,9 +34,9 @@ impl AppState {
         let vibrance = Vibrance::load();
         match vibrance.as_ref() {
             Some(v) => log::info!("{} vibrance backend initialized", v.vendor()),
-            None => log::warn!(
-                "no vibrance backend (NVIDIA/AMD driver not found) — gamma still works"
-            ),
+            None => {
+                log::warn!("no vibrance backend (NVIDIA/AMD driver not found) — gamma still works")
+            }
         }
         let store = PresetStore::load();
         Self {
@@ -54,7 +54,11 @@ impl AppState {
         self.vibrance
             .as_ref()
             .and_then(|v| v.get().ok())
-            .map(|i| VibranceScale { min: i.min, max: i.max, default: i.default })
+            .map(|i| VibranceScale {
+                min: i.min,
+                max: i.max,
+                default: i.default,
+            })
             .unwrap_or(store::LEGACY_SCALE)
     }
 

@@ -125,6 +125,7 @@ src-tauri/src/           Rust backend
   vibrance.rs            vendor-neutral vibrance over nvapi.rs / amd.rs
   watcher.rs             per-program auto-switch
   foreground.rs          foreground-program tracker
+  process.rs             read-only process / window enumeration behind both
 ```
 
 ## Data

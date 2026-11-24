@@ -13,13 +13,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId,
 };
 
-use crate::watcher;
+use crate::process;
 
 static FOREGROUND_RUNNING: AtomicBool = AtomicBool::new(false);
 
-/// How long a resolved pid → exe pair is trusted. A just-launched process can
-/// be missing from the first snapshot, so the lookup repeats on this interval
-/// even when the foreground pid hasn't changed.
+/// How long a resolved window → exe pair is trusted. A just-launched process
+/// can be missing from the first snapshot, so the lookup repeats on this
+/// interval even when the foreground window hasn't changed.
 const EXE_CACHE_TTL: Duration = Duration::from_secs(3);
 
 /// Start the tracker thread. `on_front(exe)` fires whenever the foreground
@@ -35,7 +35,9 @@ where
     }
     thread::spawn(move || {
         let own_pid = unsafe { GetCurrentProcessId() };
-        let mut cache: Option<(u32, Option<String>, Instant)> = None;
+        // Keyed on the window as well as the pid: the desktop and a File
+        // Explorer window share explorer.exe's pid but only one is "shell".
+        let mut cache: Option<((HWND, u32), Option<String>, Instant)> = None;
         let mut announced: Option<Option<String>> = None;
 
         loop {
@@ -44,17 +46,18 @@ where
             unsafe {
                 GetWindowThreadProcessId(fg, Some(&mut pid));
             }
+            let key = (fg, pid);
             let stale = match &cache {
-                Some((p, _, at)) => *p != pid || at.elapsed() > EXE_CACHE_TTL,
+                Some((k, _, at)) => *k != key || at.elapsed() > EXE_CACHE_TTL,
                 None => true,
             };
             if stale {
                 let exe = if pid == 0 || pid == own_pid || is_shell(fg) {
                     None
                 } else {
-                    watcher::exe_for_pid(pid)
+                    process::exe_for_pid(pid)
                 };
-                cache = Some((pid, exe, Instant::now()));
+                cache = Some((key, exe, Instant::now()));
             }
             let front = cache.as_ref().and_then(|(_, exe, _)| exe.clone());
             if announced.as_ref() != Some(&front) {

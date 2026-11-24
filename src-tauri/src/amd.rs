@@ -12,14 +12,15 @@
 //! path AMD's own Radeon software uses. BattlEye / EAC safe.
 //!
 //! Built to FAIL CLOSED on untested hardware (this repo's dev machine is
-//! NVIDIA): a display is only kept if it passes ColorCaps AND answers a live
-//! Color_Get; DisplayInfo reads are clamped to the actual allocation size; and
+//! NVIDIA): a display is dropped if ColorCaps says it lacks saturation, and is
+//! only kept if it answers a live Color_Get; DisplayInfo reads are clamped to
+//! the actual allocation size; and
 //! every failure degrades to "no AMD vibrance" instead of a panic
 //! (`panic = "abort"` in release).
 
 #![allow(non_snake_case)]
 
-use crate::vibrance::VibranceInfo;
+use crate::vibrance::{clamp_level, for_each_display, VibranceInfo};
 use std::os::raw::{c_int, c_void};
 
 const ADL_OK: c_int = 0;
@@ -94,13 +95,20 @@ unsafe fn adl_free(ptr: *mut c_void) {
 
 // x64-only app: `extern "system"` == `extern "C"` here; "system" documents the
 // __stdcall the ADL headers declare (which only matters on x86).
-type FnMainControlCreate = unsafe extern "system" fn(MallocCallback, c_int, *mut AdlContext) -> c_int;
+type FnMainControlCreate =
+    unsafe extern "system" fn(MallocCallback, c_int, *mut AdlContext) -> c_int;
 type FnMainControlDestroy = unsafe extern "system" fn(AdlContext) -> c_int;
 type FnNumAdapters = unsafe extern "system" fn(AdlContext, *mut c_int) -> c_int;
 type FnAdapterActive = unsafe extern "system" fn(AdlContext, c_int, *mut c_int) -> c_int;
-type FnDisplayInfoGet =
-    unsafe extern "system" fn(AdlContext, c_int, *mut c_int, *mut *mut ADLDisplayInfo, c_int) -> c_int;
-type FnColorCapsGet = unsafe extern "system" fn(AdlContext, c_int, c_int, *mut c_int, *mut c_int) -> c_int;
+type FnDisplayInfoGet = unsafe extern "system" fn(
+    AdlContext,
+    c_int,
+    *mut c_int,
+    *mut *mut ADLDisplayInfo,
+    c_int,
+) -> c_int;
+type FnColorCapsGet =
+    unsafe extern "system" fn(AdlContext, c_int, c_int, *mut c_int, *mut c_int) -> c_int;
 type FnColorGet = unsafe extern "system" fn(
     AdlContext,
     c_int,
@@ -113,6 +121,8 @@ type FnColorGet = unsafe extern "system" fn(
     *mut c_int, // step
 ) -> c_int;
 type FnColorSet = unsafe extern "system" fn(AdlContext, c_int, c_int, c_int, c_int) -> c_int;
+
+const NO_DISPLAY: &str = "no AMD display";
 
 pub struct Adl {
     _lib: libloading::Library,
@@ -202,10 +212,12 @@ impl Adl {
             }
             let mut count: c_int = 0;
             let mut infos: *mut ADLDisplayInfo = std::ptr::null_mut();
-            if unsafe { (self.display_info_get)(self.context, adapter, &mut count, &mut infos, 0) }
-                != ADL_OK
-                || infos.is_null()
-            {
+            let st = unsafe {
+                (self.display_info_get)(self.context, adapter, &mut count, &mut infos, 0)
+            };
+            if st != ADL_OK || infos.is_null() {
+                // ADL may have allocated before failing; adl_free is null-safe.
+                unsafe { adl_free(infos as *mut c_void) };
                 continue;
             }
             // Clamp to what ADL actually allocated through our callback, so a
@@ -215,8 +227,8 @@ impl Adl {
             let count = (count.max(0) as usize).min(fit);
             for i in 0..count {
                 let d = unsafe { *infos.add(i) };
-                let mask =
-                    ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
+                let mask = ADL_DISPLAY_DISPLAYINFO_DISPLAYCONNECTED
+                    | ADL_DISPLAY_DISPLAYINFO_DISPLAYMAPPED;
                 if (d.iDisplayInfoValue & mask) != mask
                     || d.displayID.iDisplayLogicalAdapterIndex != adapter
                 {
@@ -226,9 +238,10 @@ impl Adl {
                 if out.contains(&(adapter, display)) {
                     continue;
                 }
-                // Keep only displays that expressly support saturation AND
-                // answer a live query — this also fails closed if any ADL
-                // assumption is off on real hardware.
+                // Drop a display whose caps expressly lack saturation. If the
+                // caps query itself fails, the live query below is the gate —
+                // it also fails closed if any ADL assumption is off on real
+                // hardware.
                 let mut caps: c_int = 0;
                 let mut valid: c_int = 0;
                 if unsafe {
@@ -266,15 +279,26 @@ impl Adl {
         if st != ADL_OK {
             return Err(format!("ADL2_Display_Color_Get failed: {st}"));
         }
-        Ok(VibranceInfo { current: cur, min, max, default: def })
+        Ok(VibranceInfo {
+            current: cur,
+            min,
+            max,
+            default: def,
+        })
     }
 
     /// Set saturation for one display (clamped to its own range).
     fn color_set_for(&self, adapter: c_int, display: c_int, level: i32) -> Result<(), String> {
         let info = self.color_get_for(adapter, display)?;
-        let clamped = level.clamp(info.min, info.max);
+        let clamped = clamp_level(level, &info)?;
         let st = unsafe {
-            (self.color_set)(self.context, adapter, display, ADL_DISPLAY_COLOR_SATURATION, clamped)
+            (self.color_set)(
+                self.context,
+                adapter,
+                display,
+                ADL_DISPLAY_COLOR_SATURATION,
+                clamped,
+            )
         };
         if st != ADL_OK {
             return Err(format!("ADL2_Display_Color_Set failed: {st}"));
@@ -284,49 +308,23 @@ impl Adl {
 
     /// Saturation info for the primary output.
     pub fn get_vibrance(&self) -> Result<VibranceInfo, String> {
-        let (a, d) = self.displays().into_iter().next().ok_or("no AMD display")?;
+        let (a, d) = self.displays().into_iter().next().ok_or(NO_DISPLAY)?;
         self.color_get_for(a, d)
     }
 
     /// Set the same saturation level on EVERY output (mirrors the NVAPI path —
     /// otherwise a second monitor keeps a stale level and looks different).
     pub fn set_vibrance(&self, level: i32) -> Result<(), String> {
-        let displays = self.displays();
-        if displays.is_empty() {
-            return Err("no AMD display".into());
-        }
-        let mut last_err = None;
-        for (a, d) in displays {
-            if let Err(e) = self.color_set_for(a, d, level) {
-                last_err = Some(e);
-            }
-        }
-        match last_err {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
+        for_each_display(self.displays(), NO_DISPLAY, |(a, d)| {
+            self.color_set_for(a, d, level)
+        })
     }
 
     /// Restore every output to its OWN driver-default saturation ("Normal").
     pub fn reset_vibrance_to_default(&self) -> Result<(), String> {
-        let displays = self.displays();
-        if displays.is_empty() {
-            return Err("no AMD display".into());
-        }
-        let mut last_err = None;
-        for (a, d) in displays {
-            match self.color_get_for(a, d) {
-                Ok(info) => {
-                    if let Err(e) = self.color_set_for(a, d, info.default) {
-                        last_err = Some(e);
-                    }
-                }
-                Err(e) => last_err = Some(e),
-            }
-        }
-        match last_err {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
+        for_each_display(self.displays(), NO_DISPLAY, |(a, d)| {
+            let default = self.color_get_for(a, d)?.default;
+            self.color_set_for(a, d, default)
+        })
     }
 }

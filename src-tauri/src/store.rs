@@ -26,23 +26,35 @@ pub const NORMAL_SLOT: &str = "Normal";
 /// Legacy export files predate the scale stamp. They all came from NVIDIA
 /// machines whose GetDVCInfoEx reports 0..=100 default 50 (measured live on
 /// the dev machine — NOT the "0..63" folklore scale).
-pub const LEGACY_SCALE: VibranceScale = VibranceScale { min: 0, max: 100, default: 50 };
+pub const LEGACY_SCALE: VibranceScale = VibranceScale {
+    min: 0,
+    max: 100,
+    default: 50,
+};
 
 /// Map a level from one vendor scale onto another, preserving its position
 /// relative to the scale's NEUTRAL point (default), not its absolute value.
 /// Same-scale mapping is the identity.
+///
+/// The scales come from a driver or an import file, so the math runs in f64
+/// (no i32 overflow on extreme values) and a nonsensical destination range
+/// (min > max) maps everything to its default instead of panicking.
 fn rescale_vibrance(v: i32, src: VibranceScale, dst: VibranceScale) -> i32 {
-    let t = if v >= src.default {
-        let span = (src.max - src.default) as f64;
-        if span <= 0.0 { 0.0 } else { (v - src.default) as f64 / span }
+    if dst.min > dst.max {
+        return dst.default;
+    }
+    let (v, s_min, s_def, s_max) = (v as f64, src.min as f64, src.default as f64, src.max as f64);
+    let (d_min, d_def, d_max) = (dst.min as f64, dst.default as f64, dst.max as f64);
+    let span = if v >= s_def {
+        s_max - s_def
     } else {
-        let span = (src.default - src.min) as f64;
-        if span <= 0.0 { 0.0 } else { (v - src.default) as f64 / span }
+        s_def - s_min
     };
+    let t = if span <= 0.0 { 0.0 } else { (v - s_def) / span };
     let out = if t >= 0.0 {
-        dst.default as f64 + t * (dst.max - dst.default) as f64
+        d_def + t * (d_max - d_def)
     } else {
-        dst.default as f64 + t * (dst.default - dst.min) as f64
+        d_def + t * (d_def - d_min)
     };
     (out.round() as i32).clamp(dst.min, dst.max)
 }
@@ -99,7 +111,7 @@ pub struct PresetStore {
 
 fn normal_preset() -> Preset {
     Preset {
-        slot: "Normal".into(),
+        slot: NORMAL_SLOT.into(),
         name: "Normal".into(),
         dials: ColorDials::default(),
         vibrance: 0,
@@ -111,7 +123,7 @@ impl Default for PresetStore {
     fn default() -> Self {
         PresetStore {
             presets: vec![normal_preset()],
-            active: "Normal".into(),
+            active: NORMAL_SLOT.into(),
             next_id: 1,
             autostart: true,
             hotkeys: true,
@@ -127,15 +139,55 @@ fn store_path() -> PathBuf {
 }
 
 impl PresetStore {
+    /// Load presets.json. A missing file is the normal first run. A file that
+    /// exists but can't be read or parsed is copied to `presets.json.bad`
+    /// before defaults take over, because the next save would otherwise
+    /// overwrite the only copy of the user's presets.
     pub fn load() -> Self {
         let path = store_path();
-        match std::fs::read_to_string(&path) {
-            Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
-                log::warn!("presets.json parse failed ({e}); using defaults");
-                PresetStore::default()
-            }),
-            Err(_) => PresetStore::default(),
+        let failure = match std::fs::read_to_string(&path) {
+            Ok(s) => match serde_json::from_str::<PresetStore>(&s) {
+                Ok(store) => return store.normalized(),
+                Err(e) => format!("parse failed ({e})"),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return PresetStore::default(),
+            Err(e) => format!("read failed ({e})"),
+        };
+        let backup = path.with_extension("json.bad");
+        match std::fs::copy(&path, &backup) {
+            Ok(_) => log::warn!(
+                "presets.json {failure}; kept a copy at {}",
+                backup.display()
+            ),
+            Err(e) => log::warn!("presets.json {failure}; backup also failed ({e})"),
         }
+        PresetStore::default()
+    }
+
+    /// Repair invariants a hand-edited or older file can break: the Normal
+    /// baseline exists and comes first, `active` names a real slot, and
+    /// `next_id` is past every existing `p{n}` key so a new preset can never
+    /// collide with one already in the file.
+    fn normalized(mut self) -> Self {
+        if let Some(i) = self.presets.iter().position(|p| p.slot == NORMAL_SLOT) {
+            if i != 0 {
+                let normal = self.presets.remove(i);
+                self.presets.insert(0, normal);
+            }
+        } else {
+            self.presets.insert(0, normal_preset());
+        }
+        if self.get(&self.active).is_none() {
+            self.active = NORMAL_SLOT.into();
+        }
+        let highest = self
+            .presets
+            .iter()
+            .filter_map(|p| p.slot.strip_prefix('p')?.parse::<u32>().ok())
+            .max()
+            .unwrap_or(0);
+        self.next_id = self.next_id.max(highest.saturating_add(1));
+        self
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -156,15 +208,21 @@ impl PresetStore {
         self.presets.iter().find(|p| p.slot == slot)
     }
 
-    pub fn update(&mut self, slot: &str, dials: ColorDials, vibrance: i32) {
-        if let Some(p) = self.presets.iter_mut().find(|p| p.slot == slot) {
-            p.dials = dials;
-            p.vibrance = vibrance;
-        }
+    /// Overwrite a slot's color values.
+    pub fn update(&mut self, slot: &str, dials: ColorDials, vibrance: i32) -> Result<(), String> {
+        let p = self
+            .presets
+            .iter_mut()
+            .find(|p| p.slot == slot)
+            .ok_or("unknown slot")?;
+        p.dials = dials;
+        p.vibrance = vibrance;
+        Ok(())
     }
 
-    /// Create a new user preset seeded neutral. Returns a clone of the new preset.
-    pub fn add(&mut self, name: String) -> Preset {
+    /// Create a new user preset with a fresh `p{next_id}` key and return a
+    /// clone of it. A blank name becomes "Preset N".
+    pub fn add(&mut self, name: String, dials: ColorDials, vibrance: i32) -> Preset {
         let slot = format!("p{}", self.next_id);
         self.next_id += 1;
         let name = if name.trim().is_empty() {
@@ -175,8 +233,8 @@ impl PresetStore {
         let preset = Preset {
             slot,
             name,
-            dials: ColorDials::default(),
-            vibrance: 0,
+            dials,
+            vibrance,
             exe: None,
         };
         self.presets.push(preset.clone());
@@ -186,7 +244,7 @@ impl PresetStore {
     /// Delete a user preset. Normal is protected. If the deleted slot was active,
     /// active falls back to Normal.
     pub fn delete(&mut self, slot: &str) -> Result<(), String> {
-        if slot == "Normal" {
+        if slot == NORMAL_SLOT {
             return Err("Normal baseline cannot be deleted".into());
         }
         let before = self.presets.len();
@@ -195,14 +253,14 @@ impl PresetStore {
             return Err("unknown slot".into());
         }
         if self.active == slot {
-            self.active = "Normal".into();
+            self.active = NORMAL_SLOT.into();
         }
         Ok(())
     }
 
     /// Rename a user preset (display name only). Normal is protected.
     pub fn rename(&mut self, slot: &str, name: String) -> Result<(), String> {
-        if slot == "Normal" {
+        if slot == NORMAL_SLOT {
             return Err("Normal baseline cannot be renamed".into());
         }
         let name = name.trim();
@@ -222,12 +280,16 @@ impl PresetStore {
     /// lowercased so process matching is case-insensitive. Normal is protected.
     /// Any other preset bound to the same exe is cleared so an exe maps to one slot.
     pub fn set_binding(&mut self, slot: &str, exe: Option<String>) -> Result<(), String> {
-        if slot == "Normal" {
+        if slot == NORMAL_SLOT {
             return Err("Normal baseline cannot be bound".into());
         }
         let exe = exe.and_then(|e| {
             let e = e.trim().to_lowercase();
-            if e.is_empty() { None } else { Some(e) }
+            if e.is_empty() {
+                None
+            } else {
+                Some(e)
+            }
         });
         if self.presets.iter().all(|p| p.slot != slot) {
             return Err("unknown slot".into());
@@ -260,7 +322,11 @@ impl PresetStore {
     pub fn export_json(&self, scale: VibranceScale) -> Result<String, String> {
         let file = ExportFile {
             vibrance_scale: scale,
-            presets: self.presets.iter().filter(|p| p.slot != "Normal").collect(),
+            presets: self
+                .presets
+                .iter()
+                .filter(|p| p.slot != NORMAL_SLOT)
+                .collect(),
         };
         serde_json::to_string_pretty(&file).map_err(|e| e.to_string())
     }
@@ -272,26 +338,25 @@ impl PresetStore {
     /// both the current `{vibrance_scale, presets}` shape and the legacy bare
     /// array (NVIDIA-era exports). Returns the number of presets added.
     pub fn import_json(&mut self, json: &str, dst: VibranceScale) -> Result<usize, String> {
-        let (src, incoming) = match serde_json::from_str::<ImportFile>(json) {
-            Ok(f) => (f.vibrance_scale.unwrap_or(LEGACY_SCALE), f.presets),
-            Err(_) => {
-                let legacy: Vec<Preset> = serde_json::from_str(json)
-                    .map_err(|e| format!("invalid preset file: {e}"))?;
-                (LEGACY_SCALE, legacy)
-            }
+        let invalid = |e: serde_json::Error| format!("invalid preset file: {e}");
+        // Pick the shape first so a bad entry reports its own parse error
+        // rather than the other shape's.
+        let value: serde_json::Value = serde_json::from_str(json).map_err(invalid)?;
+        let (src, incoming) = if value.is_array() {
+            (
+                LEGACY_SCALE,
+                serde_json::from_value::<Vec<Preset>>(value).map_err(invalid)?,
+            )
+        } else {
+            let f: ImportFile = serde_json::from_value(value).map_err(invalid)?;
+            (f.vibrance_scale.unwrap_or(LEGACY_SCALE), f.presets)
         };
         let mut added = 0;
         for p in incoming {
-            if p.slot == "Normal" {
+            if p.slot == NORMAL_SLOT {
                 continue;
             }
-            // add() mints a fresh slot key and pushes a neutral preset; stamp the
-            // imported color onto it via last_mut() so keys never collide.
-            self.add(p.name);
-            if let Some(slot) = self.presets.last_mut() {
-                slot.dials = p.dials;
-                slot.vibrance = rescale_vibrance(p.vibrance, src, dst);
-            }
+            self.add(p.name, p.dials, rescale_vibrance(p.vibrance, src, dst));
             added += 1;
         }
         Ok(added)
@@ -302,8 +367,21 @@ impl PresetStore {
 mod tests {
     use super::*;
 
-    const NV: VibranceScale = VibranceScale { min: 0, max: 100, default: 50 };
-    const AMD: VibranceScale = VibranceScale { min: 0, max: 200, default: 100 };
+    /// A neutral user preset, as the UI's "Blank" creates it.
+    fn add(s: &mut PresetStore, name: &str) -> Preset {
+        s.add(name.into(), ColorDials::default(), 0)
+    }
+
+    const NV: VibranceScale = VibranceScale {
+        min: 0,
+        max: 100,
+        default: 50,
+    };
+    const AMD: VibranceScale = VibranceScale {
+        min: 0,
+        max: 200,
+        default: 100,
+    };
 
     #[test]
     fn rescale_same_scale_is_identity() {
@@ -329,25 +407,29 @@ mod tests {
 
     #[test]
     fn rescale_degenerate_span_maps_to_default() {
-        let flat = VibranceScale { min: 50, max: 50, default: 50 };
+        let flat = VibranceScale {
+            min: 50,
+            max: 50,
+            default: 50,
+        };
         assert_eq!(rescale_vibrance(50, flat, AMD), 100);
     }
 
     #[test]
     fn add_mints_monotonic_keys_never_reused() {
         let mut s = PresetStore::default();
-        let a = s.add("A".into());
-        let b = s.add("B".into());
+        let a = add(&mut s, "A");
+        let b = add(&mut s, "B");
         assert_eq!(a.slot, "p1");
         assert_eq!(b.slot, "p2");
         s.delete(&b.slot).unwrap();
-        assert_eq!(s.add("C".into()).slot, "p3"); // deleted key never reused
+        assert_eq!(add(&mut s, "C").slot, "p3"); // deleted key never reused
     }
 
     #[test]
     fn add_blank_name_gets_placeholder() {
         let mut s = PresetStore::default();
-        assert_eq!(s.add("   ".into()).name, "Preset 1");
+        assert_eq!(add(&mut s, "   ").name, "Preset 1");
     }
 
     #[test]
@@ -361,7 +443,7 @@ mod tests {
     #[test]
     fn delete_active_falls_back_to_normal() {
         let mut s = PresetStore::default();
-        let p = s.add("A".into());
+        let p = add(&mut s, "A");
         s.active = p.slot.clone();
         s.delete(&p.slot).unwrap();
         assert_eq!(s.active, "Normal");
@@ -370,8 +452,8 @@ mod tests {
     #[test]
     fn binding_an_exe_clears_it_off_other_slots() {
         let mut s = PresetStore::default();
-        let a = s.add("A".into());
-        let b = s.add("B".into());
+        let a = add(&mut s, "A");
+        let b = add(&mut s, "B");
         s.set_binding(&a.slot, Some("Game.EXE".into())).unwrap();
         s.set_binding(&b.slot, Some("game.exe".into())).unwrap();
         // lowercased, and the exe moved off slot A — one program, one preset
@@ -381,13 +463,13 @@ mod tests {
     #[test]
     fn export_skips_normal_import_is_additive_and_rescales() {
         let mut src = PresetStore::default();
-        let p = src.add("Comp".into());
-        src.update(&p.slot, ColorDials::default(), 75);
+        let p = add(&mut src, "Comp");
+        src.update(&p.slot, ColorDials::default(), 75).unwrap();
         let json = src.export_json(NV).unwrap();
         assert!(!json.contains("\"Normal\""));
 
         let mut dst = PresetStore::default();
-        let existing = dst.add("Mine".into());
+        let existing = add(&mut dst, "Mine");
         let added = dst.import_json(&json, AMD).unwrap();
         assert_eq!(added, 1);
         assert_eq!(dst.presets.len(), 3); // Normal + Mine + imported
@@ -413,5 +495,100 @@ mod tests {
         let file = r#"{"vibrance_scale":{"min":0,"max":100,"default":50},"presets":[{"slot":"Normal","name":"Normal","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":50}]}"#;
         assert_eq!(s.import_json(file, NV).unwrap(), 0);
         assert!(s.import_json("not json", NV).is_err());
+    }
+
+    #[test]
+    fn rescale_below_neutral_and_invalid_destination() {
+        assert_eq!(rescale_vibrance(25, NV, AMD), 50); // halfway below neutral
+        let inverted = VibranceScale {
+            min: 200,
+            max: 0,
+            default: 100,
+        };
+        assert_eq!(rescale_vibrance(75, NV, inverted), 100); // no panic, default
+        assert_eq!(rescale_vibrance(i32::MAX, NV, AMD), 200); // no overflow
+        assert_eq!(rescale_vibrance(i32::MIN, NV, AMD), 0);
+    }
+
+    #[test]
+    fn update_unknown_slot_errors() {
+        let mut s = PresetStore::default();
+        assert!(s.update("p404", ColorDials::default(), 10).is_err());
+    }
+
+    #[test]
+    fn rename_trims_and_rejects_blank_or_unknown() {
+        let mut s = PresetStore::default();
+        let p = add(&mut s, "A");
+        s.rename(&p.slot, "  Comp  ".into()).unwrap();
+        assert_eq!(s.get(&p.slot).unwrap().name, "Comp");
+        assert!(s.rename(&p.slot, "   ".into()).is_err());
+        assert!(s.rename("p404", "X".into()).is_err());
+    }
+
+    #[test]
+    fn delete_unknown_slot_errors() {
+        let mut s = PresetStore::default();
+        assert!(s.delete("p404").is_err());
+    }
+
+    #[test]
+    fn binding_clears_with_none_or_blank_and_rejects_unknown() {
+        let mut s = PresetStore::default();
+        let p = add(&mut s, "A");
+        s.set_binding(&p.slot, Some("game.exe".into())).unwrap();
+        s.set_binding(&p.slot, None).unwrap();
+        assert!(s.bindings().is_empty());
+        s.set_binding(&p.slot, Some("game.exe".into())).unwrap();
+        s.set_binding(&p.slot, Some("   ".into())).unwrap();
+        assert!(s.bindings().is_empty());
+        assert!(s.set_binding("p404", Some("game.exe".into())).is_err());
+    }
+
+    #[test]
+    fn import_without_scale_stamp_uses_legacy_scale() {
+        let file = r#"{"presets":[{"slot":"p1","name":"Old","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":75}]}"#;
+        let mut s = PresetStore::default();
+        assert_eq!(s.import_json(file, AMD).unwrap(), 1);
+        assert_eq!(s.presets.last().unwrap().vibrance, 150);
+    }
+
+    #[test]
+    fn import_blank_name_gets_placeholder() {
+        let file = r#"[{"slot":"p1","name":"  ","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":50}]"#;
+        let mut s = PresetStore::default();
+        s.import_json(file, NV).unwrap();
+        assert_eq!(s.presets.last().unwrap().name, "Preset 1");
+    }
+
+    // On-disk compatibility: a presets.json written before `next_id`,
+    // `autostart`, `hotkeys` and `exe` existed must still load.
+    #[test]
+    fn minimal_old_file_loads_with_defaults_and_safe_next_id() {
+        let file = r#"{"presets":[
+            {"slot":"Normal","name":"Normal","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":0},
+            {"slot":"p4","name":"Comp","dials":{"gamma":1.2,"brightness":0.0,"contrast":1.0},"vibrance":80}
+        ],"active":"p4"}"#;
+        let mut s = serde_json::from_str::<PresetStore>(file)
+            .unwrap()
+            .normalized();
+        assert!(s.autostart && s.hotkeys);
+        assert_eq!(s.active, "p4");
+        assert_eq!(s.get("p4").unwrap().exe, None);
+        assert_eq!(add(&mut s, "New").slot, "p5"); // never collides with p4
+    }
+
+    #[test]
+    fn normalized_restores_normal_and_a_valid_active() {
+        let file = r#"{"presets":[
+            {"slot":"p1","name":"A","dials":{"gamma":1.0,"brightness":0.0,"contrast":1.0},"vibrance":50}
+        ],"active":"gone","next_id":2}"#;
+        let s = serde_json::from_str::<PresetStore>(file)
+            .unwrap()
+            .normalized();
+        assert_eq!(s.presets[0].slot, NORMAL_SLOT);
+        assert_eq!(s.presets.len(), 2);
+        assert_eq!(s.active, NORMAL_SLOT);
+        assert_eq!(s.next_id, 2);
     }
 }

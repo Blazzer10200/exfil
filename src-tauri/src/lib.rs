@@ -10,8 +10,9 @@
 //! - `store`      preset model + persistence
 //! - `gamma`      GDI gamma ramps
 //! - `vibrance`   vendor-neutral digital vibrance (`nvapi` / `amd` backends)
-//! - `watcher`    per-program auto-switch (read-only process enumeration)
+//! - `watcher`    per-program auto-switch
 //! - `foreground` foreground-program tracker
+//! - `process`    read-only process / window enumeration behind both
 
 mod amd;
 mod commands;
@@ -19,6 +20,7 @@ mod foreground;
 mod gamma;
 mod hotkeys;
 mod nvapi;
+mod process;
 mod state;
 mod store;
 mod tray;
@@ -57,7 +59,9 @@ pub fn run() {
         // autostart + a manual double-click) routes here instead of spawning a
         // second pulse thread + watcher fighting over the same monitors — we just
         // surface the already-running window, even if it was started hidden.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| show_main_window(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main_window(app)
+        }))
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             Some(vec![HIDDEN_ARG]),
