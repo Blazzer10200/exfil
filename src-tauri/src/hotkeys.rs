@@ -72,12 +72,6 @@ fn next_slot(state: &AppState) -> Option<String> {
     Some(s.presets[(idx + 1) % s.presets.len()].slot.clone())
 }
 
-/// Whether the global hotkeys are enabled (stored preference; default on).
-#[tauri::command]
-pub fn get_hotkeys(state: State<AppState>) -> bool {
-    lock(&state.store).hotkeys
-}
-
 /// Toggle the global hotkeys: (un)registers them live and persists the choice
 /// so boot-time setup honors it. Returns the new value.
 #[tauri::command]

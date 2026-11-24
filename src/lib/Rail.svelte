@@ -39,6 +39,7 @@
     class:active={app.view === "settings"}
     title="Settings"
     aria-label="Settings"
+    aria-current={app.view === "settings" ? "page" : undefined}
     onclick={() => app.setView("settings")}
   >
     <Settings size={18} strokeWidth={1.75} />

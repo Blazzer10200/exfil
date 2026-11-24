@@ -2,11 +2,10 @@
   // SETTINGS page: every section rendered at once in two columns; the strip
   // scrolls to a section (and tracks the one in view) instead of swapping.
   import { onMount } from "svelte";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getVersion } from "@tauri-apps/api/app";
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { ExternalLink } from "lucide-svelte";
-  import { exportPresets, getAutostart, importPresets, installUpdate, openUrl, setAutostart, setHotkeys, uninstallApp } from "./api";
+  import { exportPresets, getAutostart, importPresets, openUrl, setAutostart, setHotkeys, uninstallApp } from "./api";
   import { app } from "./state.svelte";
   import { toast, reason } from "./toast.svelte";
   import Strip, { type StripItem } from "./Strip.svelte";
@@ -39,19 +38,11 @@
 
   let autostart = $state(false);
   let version = $state("");
-  let phase = $state<"idle" | "checking" | "none" | "installing">("idle");
-  let progress = $state(0);
   let uninstallErr = $state("");
-  let unlisten: UnlistenFn | undefined;
 
   onMount(() => {
     getAutostart().then((v) => (autostart = v)).catch(() => {});
     getVersion().then((v) => (version = v)).catch(() => {});
-    listen<number>("update-progress", (e) => {
-      progress = e.payload;
-      toast.info(`◌ UPDATING · ${e.payload}%`, { spin: true, sticky: true });
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
   });
 
   async function toggleAutostart() {
@@ -88,25 +79,6 @@
       toast.ok("✓ PRESETS IMPORTED");
     } catch (e) {
       toast.error(`✕ IMPORT FAILED · ${reason(e)}`);
-    }
-  }
-  async function check() {
-    phase = "checking";
-    const meta = await app.refreshUpdate();
-    if (meta) phase = "idle";
-    else {
-      phase = "none";
-      setTimeout(() => phase === "none" && (phase = "idle"), 3000);
-    }
-  }
-  async function install() {
-    phase = "installing";
-    progress = 0;
-    try {
-      await installUpdate(); // only settles on failure — success relaunches
-    } catch (e) {
-      phase = "idle";
-      toast.error(`✕ UPDATE FAILED · ${reason(e)}`, { label: "RETRY", run: () => void install() });
     }
   }
   async function uninstall() {
@@ -152,7 +124,7 @@
   </div>
 
   <div class="col">
-    <span class="sec-label display hk" data-sec="hotkeys">
+    <span class="sec-label display" data-sec="hotkeys">
       GLOBAL HOTKEYS
       <button class="toggle" class:on={app.hotkeys} aria-label="Global hotkeys" onclick={toggleHotkeys}></button>
     </span>
@@ -179,16 +151,16 @@
         <span class="t display" class:amber={!!app.updateMeta}>{app.updateMeta ? `UPDATE READY · v${app.updateMeta.version}` : "Updates"}</span>
         <span class="d mono">{app.updateMeta ? "signature-verified · restarts when done" : "signed GitHub release · installs + relaunches"}</span>
       </span>
-      {#if phase === "installing"}
-        <span class="pct mono">{progress}%</span>
+      {#if app.updatePhase === "installing"}
+        <span class="pct mono">{app.updateProgress}%</span>
       {:else if app.updateMeta}
-        <button class="chip accent" onclick={install}>INSTALL</button>
-      {:else if phase === "checking"}
+        <button class="chip accent" onclick={() => void app.installUpdate()}>INSTALL</button>
+      {:else if app.updatePhase === "checking"}
         <span class="pct mono">CHECKING…</span>
-      {:else if phase === "none"}
+      {:else if app.updatePhase === "none"}
         <span class="pct mono ok">UP TO DATE</span>
       {:else}
-        <button class="chip" onclick={check}>CHECK FOR UPDATES</button>
+        <button class="chip" onclick={() => void app.checkForUpdate()}>CHECK FOR UPDATES</button>
       {/if}
     </div>
     <div class="row panel danger">

@@ -10,7 +10,6 @@
   import { toast, reason } from "./toast.svelte";
 
   interface Props {
-    heading?: string;
     sub: string;
     onpick: (exe: string, title: string) => void;
     onclose: () => void;
@@ -19,7 +18,7 @@
     /** What picking an already-bound exe does. */
     boundHint?: string;
   }
-  let { heading = "BIND PROGRAM", sub, onpick, onclose, boundTo, boundHint = "will rebind" }: Props = $props();
+  let { sub, onpick, onclose, boundTo, boundHint = "will rebind" }: Props = $props();
 
   let procs = $state<WindowProc[]>([]);
   let filter = $state("");
@@ -65,10 +64,10 @@
 <svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} />
 
 <button class="backdrop" aria-label="Close" onclick={onclose}></button>
-<div class="dialog" role="dialog" aria-modal="true" aria-label={heading} tabindex="-1" use:focus>
+<div class="dialog" role="dialog" aria-modal="true" aria-label="Bind program" tabindex="-1" use:focus>
   <button class="close" aria-label="Close" onclick={onclose}><X size={14} /></button>
   <div class="head">
-    <div class="title display">{heading}</div>
+    <div class="title display">BIND PROGRAM</div>
     <div class="sub mono">{sub}</div>
   </div>
   <button class="chip tall browse" onclick={browse}><FolderOpen size={13} /> BROWSE FOR .EXE…</button>

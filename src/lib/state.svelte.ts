@@ -11,6 +11,7 @@ import {
   getInFront,
   getPresets,
   getStatus,
+  installUpdate,
   primaryMonitor,
   renamePreset,
   resetDisplay,
@@ -29,6 +30,9 @@ import { toast, reason } from "./toast.svelte";
 /** A program bound to a preset (a preset with an `exe`). */
 export type Binding = { exe: string; preset: Preset };
 
+/** Where the Settings → About update row is: idle, checking, "up to date", installing. */
+export type UpdatePhase = "idle" | "checking" | "none" | "installing";
+
 
 class AppStore {
   // ── color ──
@@ -43,6 +47,10 @@ class AppStore {
   inFront = $state<string | null>(null);
   monitor = $state<MonitorInfo | null>(null);
   updateMeta = $state<UpdateMeta | null>(null);
+  // Lives here, not in SettingsView: views remount on every tab switch, and a
+  // download in flight must survive leaving Settings.
+  updatePhase = $state<UpdatePhase>("idle");
+  updateProgress = $state(0);
   hotkeys = $state(true);
   view = $state<View>("games");
   grid = $state(prefs.grid);
@@ -94,6 +102,23 @@ class AppStore {
     this.dials = { ...p.dials };
     this.vibrance = p.vibrance;
   }
+  /** Make `p` the active preset on the display and in the UI. */
+  async #activate(p: Preset) {
+    await selectPreset(p.slot);
+    this.active = p.slot;
+    this.#loadInto(p);
+  }
+  /** Re-read the preset list after a multi-step action failed part-way, so
+   *  whatever the backend did create shows up instead of waiting for a restart. */
+  async #resync() {
+    try {
+      this.presets = (await getPresets()).presets;
+    } catch {
+      // the original failure is already on screen
+    }
+  }
+  /** Name of the preset a program is bound to, if any. */
+  boundTo = (exe: string) => this.bindings.find((b) => b.exe === exe)?.preset.name ?? null;
 
   async boot() {
     try {
@@ -112,6 +137,14 @@ class AppStore {
     // First run lands on Games (nothing bound yet); afterwards, the last view.
     this.view = prefs.view ?? (this.bindings.length ? "color" : "games");
 
+    try {
+      await this.#listen();
+    } catch (e) {
+      toast.error(`✕ EVENTS UNAVAILABLE · ${reason(e)}`);
+    }
+  }
+
+  async #listen() {
     // Watcher auto-applied a bound preset (or reverted on exit). The watcher
     // also re-announces the current slot (boot baseline, hotkey re-pick) —
     // only a real slot change should retune the dials, or a no-op event
@@ -132,6 +165,10 @@ class AppStore {
       }),
       await listen<string | null>("in-front", (e) => {
         this.inFront = e.payload;
+      }),
+      await listen<number>("update-progress", (e) => {
+        this.updateProgress = e.payload;
+        toast.info(`UPDATING · ${e.payload}%`, { spin: true, sticky: true });
       }),
     );
   }
@@ -209,9 +246,7 @@ class AppStore {
     try {
       const p = await createPreset(name); // "" → backend auto-names "Preset N"
       this.presets = [...this.presets, p];
-      await selectPreset(p.slot);
-      this.active = p.slot;
-      this.#loadInto(p);
+      await this.#activate(p);
       return p;
     } catch (e) {
       toast.error(`✕ CREATE FAILED · ${reason(e)}`);
@@ -236,12 +271,11 @@ class AppStore {
       const p = await createPreset(name);
       const store = await setBinding(p.slot, exe);
       this.presets = store.presets;
-      await selectPreset(p.slot);
-      this.active = p.slot;
-      this.#loadInto(this.presets.find((x) => x.slot === p.slot) ?? p);
+      await this.#activate(this.presets.find((x) => x.slot === p.slot) ?? p);
       toast.ok(`✓ BOUND · ${exe.toUpperCase()}`);
     } catch (e) {
       toast.error(`✕ BIND FAILED · ${reason(e)}`);
+      await this.#resync();
     } finally {
       this.busy = false;
     }
@@ -256,12 +290,11 @@ class AppStore {
       await savePreset(p.slot, { ...src.dials }, src.vibrance);
       const dup = { ...p, dials: { ...src.dials }, vibrance: src.vibrance };
       this.presets = [...this.presets, dup];
-      await selectPreset(p.slot);
-      this.active = p.slot;
-      this.#loadInto(dup);
+      await this.#activate(dup);
       toast.ok(`✓ DUPLICATED · ${dup.name.toUpperCase()}`);
     } catch (e) {
       toast.error(`✕ DUPLICATE FAILED · ${reason(e)}`);
+      await this.#resync();
     } finally {
       this.busy = false;
     }
@@ -301,23 +334,52 @@ class AppStore {
     }
   }
 
+  /** Bind (or, with `exe = null`, unbind) a program. Resolves to whether it worked. */
   async bindPreset(slot: string, exe: string | null) {
     try {
       const store = await setBinding(slot, exe);
       this.presets = store.presets;
       toast.ok(exe ? `✓ BOUND · ${exe.toUpperCase()}` : "✓ UNBOUND");
+      return true;
     } catch (e) {
       toast.error(`✕ BIND FAILED · ${reason(e)}`);
+      return false;
     }
   }
 
-  async refreshUpdate() {
+  // ── updates ──
+  #upToDateTimer: ReturnType<typeof setTimeout> | undefined;
+  async checkForUpdate() {
+    if (this.updatePhase !== "idle" && this.updatePhase !== "none") return;
+    clearTimeout(this.#upToDateTimer);
+    this.updatePhase = "checking";
     try {
       this.updateMeta = await checkUpdate();
-      return this.updateMeta;
     } catch (e) {
+      // A failed check is not "up to date".
+      this.updatePhase = "idle";
       toast.error(`✕ UPDATE CHECK FAILED · ${reason(e)}`);
-      return null;
+      return;
+    }
+    if (this.updateMeta) {
+      this.updatePhase = "idle";
+      return;
+    }
+    this.updatePhase = "none";
+    this.#upToDateTimer = setTimeout(() => {
+      if (this.updatePhase === "none") this.updatePhase = "idle";
+    }, 3000);
+  }
+
+  async installUpdate() {
+    if (this.updatePhase === "installing") return;
+    this.updatePhase = "installing";
+    this.updateProgress = 0;
+    try {
+      await installUpdate(); // only settles on failure — success relaunches
+    } catch (e) {
+      this.updatePhase = "idle";
+      toast.error(`✕ UPDATE FAILED · ${reason(e)}`, { label: "RETRY", run: () => void this.installUpdate() });
     }
   }
 }

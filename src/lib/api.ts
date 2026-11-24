@@ -91,7 +91,6 @@ export const setAutostart = (enabled: boolean) =>
 // Global hotkeys preference (Ctrl+Shift+F9 cycles presets, Ctrl+Shift+F10
 // snaps to Normal — handled backend-side, no window focus needed).
 // setHotkeys returns the new value.
-export const getHotkeys = () => invoke<boolean>("get_hotkeys");
 export const setHotkeys = (enabled: boolean) =>
   invoke<boolean>("set_hotkeys", { enabled });
 

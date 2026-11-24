@@ -19,13 +19,15 @@
 
   // Moving a program to another preset is one backend call: binding an exe
   // to a slot clears it from whichever slot held it before.
-  const setPreset = (b: Binding, slot: string) => app.bindPreset(slot, b.exe);
+  // If it fails, put the dropdown back on the preset that is still bound.
+  async function setPreset(b: Binding, select: HTMLSelectElement) {
+    if (!(await app.bindPreset(select.value, b.exe))) select.value = b.preset.slot;
+  }
   const unbind = (b: Binding) => app.bindPreset(b.preset.slot, null);
   async function edit(b: Binding) {
     await app.pickPreset(b.preset.slot);
     app.setView("color");
   }
-  const boundTo = (exe: string) => app.bindings.find((b) => b.exe === exe)?.preset.name ?? null;
 </script>
 
 <div class="head">
@@ -55,7 +57,7 @@
       <div class="row" class:front style="--i: {i}">
         <span class="mono-gram" class:tinted={!!ac} style={ac ? `--ac: ${ac}` : ""}>{mono(b.exe)}</span>
         <span class="prog"><span class="t display">{title(b.exe)}</span><span class="e mono">{b.exe}</span></span>
-        <select class="pill sel" value={b.preset.slot} onchange={(e) => void setPreset(b, e.currentTarget.value)}>
+        <select class="pill sel" value={b.preset.slot} onchange={(e) => void setPreset(b, e.currentTarget)}>
           {#each userPresets as p (p.slot)}<option value={p.slot}>{p.name.toUpperCase()}</option>{/each}
         </select>
         <span class="status mono" class:on={front}>
@@ -84,7 +86,7 @@
 </div>
 
 {#if picker}
-  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, t) => void app.createPresetFromGame(exe, t)} onclose={() => (picker = false)} {boundTo} boundHint="opens it" />
+  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, t) => void app.createPresetFromGame(exe, t)} onclose={() => (picker = false)} boundTo={app.boundTo} boundHint="opens it" />
 {/if}
 
 <style>

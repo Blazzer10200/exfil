@@ -196,12 +196,11 @@ textarea {
   }
 }
 @keyframes hud-shimmer {
-  0%,
-  100% {
-    background-color: oklch(0.16 0.004 250);
+  from {
+    background-position: 200% 0;
   }
-  50% {
-    background-color: oklch(0.20 0.004 250);
+  to {
+    background-position: -200% 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -288,10 +287,6 @@ textarea {
   padding: 0 6px;
   font-size: 9.5px;
 }
-.chip.dim {
-  color: var(--hud-fg-faint);
-}
-
 /* Toggle: 28×14 */
 .toggle {
   position: relative;
@@ -422,7 +417,6 @@ textarea {
     background 120ms var(--ease-hud),
     color 120ms var(--ease-hud);
 }
-.menu-item :global(svg),
 .menu-item svg {
   flex-shrink: 0;
   opacity: 0.8;

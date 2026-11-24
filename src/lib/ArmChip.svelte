@@ -4,11 +4,10 @@
   interface Props {
     label: string;
     confirm?: string;
-    disabled?: boolean;
-    size?: "xs" | "" | "lg";
+    size?: "xs" | "";
     onconfirm: () => void;
   }
-  let { label, confirm = "CLICK TO CONFIRM", disabled = false, size = "", onconfirm }: Props = $props();
+  let { label, confirm = "CLICK TO CONFIRM", size = "", onconfirm }: Props = $props();
   let armed = $state(false);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -31,6 +30,6 @@
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && armed && disarm()} />
 
-<button class="chip danger {size}" class:armed {disabled} onclick={click} onblur={disarm}>
+<button class="chip danger {size}" class:armed onclick={click} onblur={disarm}>
   {armed ? confirm : label}
 </button>

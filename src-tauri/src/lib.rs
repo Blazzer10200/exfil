@@ -90,7 +90,6 @@ pub fn run() {
             commands::primary_monitor,
             commands::open_url,
             commands::uninstall_app,
-            hotkeys::get_hotkeys,
             hotkeys::set_hotkeys,
             tray::tray_action,
             updater::check_update,

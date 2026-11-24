@@ -3,11 +3,11 @@
   // counter, SAVE ↵ / ESC chips. Enter saves, Escape cancels, blur cancels.
   interface Props {
     value: string;
-    max?: number;
     onsave: (name: string) => void;
     oncancel: () => void;
   }
-  let { value, max = 24, onsave, oncancel }: Props = $props();
+  let { value, onsave, oncancel }: Props = $props();
+  const max = 24;
   // svelte-ignore state_referenced_locally
   let draft = $state(value);
   const clean = $derived(draft.trim().slice(0, max));

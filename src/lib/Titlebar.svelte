@@ -12,25 +12,12 @@
   onMount(() => {
     getVersion().then((v) => (version = v)).catch(() => {});
   });
-
-  const crumbs = $derived.by(() => {
-    switch (app.view) {
-      case "color":
-        return ["COLOR"];
-      case "games":
-        return ["GAMES"];
-      case "settings":
-        return ["SETTINGS"];
-    }
-  });
 </script>
 
 <header class="titlebar drag" data-tauri-drag-region>
   <span class="crumb display" data-tauri-drag-region>
     EXFIL
-    {#each crumbs as c}
-      <span class="sep">//</span>{c}
-    {/each}
+    <span class="sep">//</span>{app.view.toUpperCase()}
     {#if version}<span class="ver mono">v{version}</span>{/if}
   </span>
   <span class="grow" data-tauri-drag-region></span>

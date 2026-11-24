@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Bare range track (no label/readout — Dial / SliderRow wrap it).
+  // Bare range track (no label/readout — Dial wraps it).
   // The thumb tracks the pointer continuously (input step="any") while the
   // VALUE snaps to `step`; on release / external change the thumb eases onto
   // the snapped value, so coarse integer ranges still feel fluid.

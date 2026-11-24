@@ -22,7 +22,7 @@
     {#key t}
       <span class="item toast {t.kind}">
         {#if t.spin}<span class="spin">◌</span>{/if}
-        {t.spin ? t.msg.replace(/^◌\s*/, "") : t.msg}
+        {t.msg}
         {#if t.action}
           <button class="action" onclick={t.action.run}>{t.action.label}</button>
         {/if}

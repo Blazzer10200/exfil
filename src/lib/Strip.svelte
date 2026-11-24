@@ -67,7 +67,7 @@
   }
 </script>
 
-<svelte:window onresize={measure} />
+<svelte:window onresize={measure} onkeydown={(e) => e.key === "Escape" && (allOpen = false)} />
 
 <div class="strip">
   <div class="scroll-wrap" class:fade-l={!atStart} class:fade-r={!atEnd}>

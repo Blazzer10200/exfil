@@ -1,11 +1,11 @@
 // Status-bar toasts. They replace the IN FRONT slot for a moment: ok/info
 // auto-clear after 2.2s, errors linger 5s and may carry a right-side action.
 
-export type ToastKind = "ok" | "info" | "error";
+type ToastKind = "ok" | "info" | "error";
 export type Toast = {
   kind: ToastKind;
   msg: string;
-  spin?: boolean; // info only — leading ◌ spins (update download)
+  spin?: boolean; // info only — shows a spinning ◌ before the message (update download)
   action?: { label: string; run: () => void };
 };
 
@@ -27,10 +27,6 @@ class ToastStore {
   }
   error(msg: string, action?: Toast["action"]) {
     this.#show({ kind: "error", msg, action }, 5000);
-  }
-  clear() {
-    clearTimeout(this.#timer);
-    this.current = null;
   }
 }
 

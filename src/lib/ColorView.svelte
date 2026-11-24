@@ -31,6 +31,13 @@
   let picker = $state<null | "create" | "bind">(null);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
+  // Rename and Bind act on the active preset, so only continue once `slot`
+  // really is active (pickPreset can bail while busy, or fail).
+  async function selectThen(slot: string, then: () => void) {
+    await app.pickPreset(slot);
+    if (app.active === slot) then();
+  }
+
   function openMenu(slot: string, e: MouseEvent) {
     const p = app.presets.find((x) => x.slot === slot);
     if (!p) return;
@@ -42,11 +49,11 @@
       x: e.clientX,
       y: e.clientY,
       items: [
-        { label: "Rename", icon: Pencil, run: () => { void app.pickPreset(slot).then(() => (renaming = true)); } },
+        { label: "Rename", icon: Pencil, run: () => void selectThen(slot, () => (renaming = true)) },
         { label: "Duplicate", icon: Copy, run: () => void app.duplicatePreset(slot) },
         { label: p.exe ? "Unbind program" : "Bind to program…", icon: Link2, run: () => {
           if (p.exe) void app.bindPreset(slot, null);
-          else void app.pickPreset(slot).then(() => (picker = "bind"));
+          else void selectThen(slot, () => (picker = "bind"));
         } },
         { sep: true, label: "" },
         { label: "Delete", icon: Trash2, danger: true, run: () => void app.deletePreset(slot) },
@@ -54,8 +61,9 @@
     };
   }
 
-  const boundTo = (exe: string) => app.presets.find((p) => p.exe === exe)?.name ?? null;
 </script>
+
+<svelte:window onkeydown={(e) => e.key === "Escape" && (newOpen = false)} />
 
 <Strip {items} active={app.active} onselect={(s) => void app.pickPreset(s)} oncontext={openMenu} ondblclick={(s) => s !== "Normal" && app.active === s && (renaming = true)}>
   {#snippet pin()}
@@ -153,9 +161,9 @@
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 {#if picker === "create"}
-  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, title) => void app.createPresetFromGame(exe, title)} onclose={() => (picker = null)} {boundTo} boundHint="opens it" />
+  <ProgramPicker sub="A new preset named after the game, bound to it" onpick={(exe, title) => void app.createPresetFromGame(exe, title)} onclose={() => (picker = null)} boundTo={app.boundTo} boundHint="opens it" />
 {:else if picker === "bind"}
-  <ProgramPicker sub="Auto-applies {app.current?.name ?? ''} while this program runs" onpick={(exe) => void app.bindPreset(app.active, exe)} onclose={() => (picker = null)} {boundTo} />
+  <ProgramPicker sub="Auto-applies {app.current?.name ?? ''} while this program runs" onpick={(exe) => void app.bindPreset(app.active, exe)} onclose={() => (picker = null)} boundTo={app.boundTo} />
 {/if}
 
 <style>

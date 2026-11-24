@@ -1,6 +1,6 @@
 <script lang="ts">
   // Right-click menu anchored at (x, y), clamped to the viewport. Closes on
-  // Escape, backdrop click, scroll, or blur.
+  // Escape, backdrop click, or window resize.
   import { tick } from "svelte";
   import type { IconComponent } from "./types";
 
@@ -9,7 +9,6 @@
     icon?: IconComponent;
     danger?: boolean;
     disabled?: boolean;
-    on?: boolean;
     sep?: boolean;
     run?: () => void;
   };
@@ -47,7 +46,7 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} onscroll={onclose} onresize={onclose} />
+<svelte:window onkeydown={(e) => e.key === "Escape" && onclose()} onresize={onclose} />
 
 <button class="backdrop clear" aria-label="Close menu" onclick={onclose} oncontextmenu={(e) => { e.preventDefault(); onclose(); }}></button>
 <div class="menu fixed" role="menu" tabindex="-1" bind:this={el} style="left: {left}px; top: {top}px">
@@ -55,7 +54,7 @@
     {#if it.sep}
       <div class="menu-sep"></div>
     {:else}
-      <button class="menu-item" class:danger={it.danger} class:on={it.on} role="menuitem" disabled={it.disabled} onclick={() => pick(it)}>
+      <button class="menu-item" class:danger={it.danger} role="menuitem" disabled={it.disabled} onclick={() => pick(it)}>
         {#if it.icon}<it.icon size={13} />{/if}
         {it.label}
       </button>
