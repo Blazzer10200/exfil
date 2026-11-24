@@ -17,10 +17,6 @@
     switch (app.view) {
       case "color":
         return ["COLOR"];
-      case "crosshair":
-        return ["CROSSHAIR"];
-      case "library":
-        return ["CROSSHAIR", "LIBRARY"];
       case "games":
         return ["GAMES"];
       case "settings":

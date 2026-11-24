@@ -4,18 +4,14 @@
   // scroller. At ≥10 items a searchable `▾ ALL` pin joins it.
   import { tick, type Snippet } from "svelte";
   import { ChevronDown, Link2, Search } from "lucide-svelte";
-  import type { IconComponent } from "./types";
 
   export type StripItem = {
     id: string;
     label: string;
     swatch?: string; // 6×6 square in this colour
-    thumb?: string; // 14×14 data URL
-    icon?: IconComponent;
     bound?: boolean; // shows a link icon
     dot?: string; // small attention dot in this colour (e.g. update available)
     meta?: string; // mono readout shown only while active
-    dim?: boolean;
   };
 
   interface Props {
@@ -25,9 +21,8 @@
     oncontext?: (id: string, e: MouseEvent) => void;
     ondblclick?: (id: string) => void;
     pin?: Snippet;
-    right?: Snippet; // free-floating right slot (e.g. the overlay toggle)
   }
-  let { items, active, onselect, oncontext, ondblclick, pin, right }: Props = $props();
+  let { items, active, onselect, oncontext, ondblclick, pin }: Props = $props();
 
   let scroller = $state<HTMLDivElement>();
   let atStart = $state(true);
@@ -81,7 +76,6 @@
         <button
           class="tab display"
           class:active={it.id === active}
-          class:dim={it.dim}
           role="tab"
           aria-selected={it.id === active}
           onclick={() => onselect(it.id)}
@@ -92,8 +86,6 @@
           }}
           ondblclick={() => ondblclick?.(it.id)}
         >
-          {#if it.icon}<it.icon size={13} strokeWidth={2} />{/if}
-          {#if it.thumb}<img class="thumb" src={it.thumb} alt="" draggable="false" />{/if}
           {#if it.swatch}<span class="swatch" style="background: {it.swatch}"></span>{/if}
           <span class="label">{it.label}</span>
           {#if it.bound}<span class="link"><Link2 size={11} /></span>{/if}
@@ -132,9 +124,6 @@
   {/if}
   {#if pin}
     <div class="pin">{@render pin()}</div>
-  {/if}
-  {#if right}
-    <div class="right">{@render right()}</div>
   {/if}
 </div>
 
@@ -215,9 +204,6 @@
   .tab:hover {
     color: var(--hud-fg);
   }
-  .tab.dim {
-    opacity: 0.6;
-  }
   .tab.active {
     font-weight: 700;
     color: var(--hud-fg-hi);
@@ -243,12 +229,6 @@
     height: 6px;
     border-radius: 1px;
     flex: 0 0 6px;
-  }
-  .thumb {
-    width: 14px;
-    height: 14px;
-    image-rendering: pixelated;
-    -webkit-user-drag: none;
   }
   .link {
     display: inline-flex;
@@ -326,10 +306,5 @@
     font-size: 10px;
     color: var(--hud-fg-faint);
     text-align: center;
-  }
-  .right {
-    display: flex;
-    align-items: center;
-    margin-left: 8px;
   }
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
-  // GAMES: one row per bound program, joining the preset + crosshair bindings.
+  // GAMES: one row per bound program and the preset it switches in.
   import { Monitor, ShieldCheck } from "lucide-svelte";
-  import { NO_CROSSHAIR, slotAccent } from "./api";
+  import { slotAccent } from "./api";
   import { app, type Binding } from "./state.svelte";
   import ProgramPicker from "./ProgramPicker.svelte";
   import ArmChip from "./ArmChip.svelte";
@@ -13,40 +13,24 @@
   const mono = (exe: string) => exe.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?";
   // Monogram tint = the bound preset's palette accent (same index rule as the Color strip).
   function accent(b: Binding): string | null {
-    if (!b.preset) return null;
-    const i = userPresets.findIndex((p) => p.slot === b.preset!.slot);
+    const i = userPresets.findIndex((p) => p.slot === b.preset.slot);
     return i < 0 ? null : slotAccent(b.preset.slot, i);
   }
 
-  async function setPreset(b: Binding, slot: string) {
-    if (slot === "") {
-      if (b.preset) await app.bindPreset(b.preset.slot, null);
-    } else await app.bindPreset(slot, b.exe);
-  }
-  async function setCrosshair(b: Binding, id: string) {
-    if (id === "") {
-      if (b.crosshair) await app.bindCrosshair(b.crosshair.id, null);
-    } else await app.bindCrosshair(id, b.exe);
-  }
-  async function unbind(b: Binding) {
-    if (b.preset) await app.bindPreset(b.preset.slot, null);
-    if (b.crosshair) await app.bindCrosshair(b.crosshair.id, null);
-  }
+  // Moving a program to another preset is one backend call: binding an exe
+  // to a slot clears it from whichever slot held it before.
+  const setPreset = (b: Binding, slot: string) => app.bindPreset(slot, b.exe);
+  const unbind = (b: Binding) => app.bindPreset(b.preset.slot, null);
   async function edit(b: Binding) {
-    if (b.preset) {
-      await app.pickPreset(b.preset.slot);
-      app.setView("color");
-    } else if (b.crosshair) {
-      await app.pickCrosshair(b.crosshair.id);
-      app.setView("crosshair");
-    }
+    await app.pickPreset(b.preset.slot);
+    app.setView("color");
   }
-  const boundTo = (exe: string) => app.bindings.find((b) => b.exe === exe)?.preset?.name ?? null;
+  const boundTo = (exe: string) => app.bindings.find((b) => b.exe === exe)?.preset.name ?? null;
 </script>
 
 <div class="head">
   <span class="title display">BINDINGS</span>
-  <span class="help mono">which preset + crosshair switch in while a program is in front</span>
+  <span class="help mono">which preset switches in while a program runs</span>
   <span class="grow"></span>
   <button class="chip lg accent" onclick={() => (picker = true)}>+ BIND GAME</button>
 </div>
@@ -54,13 +38,12 @@
 <div class="body" class:grid={app.grid}>
   {#if app.bindings.length}
     <div class="cols mono">
-      <span></span><span>PROGRAM</span><span>COLOR PRESET</span><span>CROSSHAIR</span><span class="st">STATUS</span><span></span>
+      <span></span><span>PROGRAM</span><span>COLOR PRESET</span><span class="st">STATUS</span><span></span>
     </div>
     <div class="row desktop">
       <span class="mono-gram"><Monitor size={11} /></span>
       <span class="prog"><span class="t display">DESKTOP</span><span class="e mono">fallback when no bound program is in front</span></span>
       <span class="pill dim">NORMAL ▾</span>
-      <span class="pill dim dashed">NONE ▾</span>
       <span class="status mono" class:on={!app.inFrontBound}>
         <span class="dot"></span><span class="st">{app.inFrontBound ? "STANDBY" : "ACTIVE"}</span>
       </span>
@@ -72,13 +55,8 @@
       <div class="row" class:front style="--i: {i}">
         <span class="mono-gram" class:tinted={!!ac} style={ac ? `--ac: ${ac}` : ""}>{mono(b.exe)}</span>
         <span class="prog"><span class="t display">{title(b.exe)}</span><span class="e mono">{b.exe}</span></span>
-        <select class="pill sel" class:dashed={!b.preset} value={b.preset?.slot ?? ""} onchange={(e) => void setPreset(b, e.currentTarget.value)}>
-          <option value="">NONE</option>
+        <select class="pill sel" value={b.preset.slot} onchange={(e) => void setPreset(b, e.currentTarget.value)}>
           {#each userPresets as p (p.slot)}<option value={p.slot}>{p.name.toUpperCase()}</option>{/each}
-        </select>
-        <select class="pill sel" class:dashed={!b.crosshair} value={b.crosshair?.id ?? ""} onchange={(e) => void setCrosshair(b, e.currentTarget.value)}>
-          <option value="">NONE</option>
-          {#each app.crosshairs.filter((c) => c.id !== NO_CROSSHAIR) as c (c.id)}<option value={c.id}>{c.name.toUpperCase()}</option>{/each}
         </select>
         <span class="status mono" class:on={front}>
           <span class="dot" class:blink={front}></span><span class="st">{front ? "RUNNING" : "IDLE"}</span>
@@ -92,7 +70,7 @@
   {:else}
     <div class="empty">
       <span class="display et">NO GAMES BOUND YET</span>
-      <span class="mono ed">bind a running game and EXFIL switches your preset + crosshair in when it's in front</span>
+      <span class="mono ed">bind a running game and EXFIL switches its preset in while the game runs</span>
       <span class="eb">
         <button class="chip lg accent" onclick={() => (picker = true)}>PICK A RUNNING GAME</button>
         <button class="chip lg" onclick={() => app.setView("color")}>TUNE COLOR FIRST</button>
@@ -151,7 +129,7 @@
   .cols,
   .row {
     display: grid;
-    grid-template-columns: 22px 1.4fr 1fr 1fr 96px 84px;
+    grid-template-columns: 22px 1.4fr 1fr 96px 84px;
     gap: 12px;
     align-items: center;
   }
@@ -235,10 +213,6 @@
   }
   .pill.dim {
     opacity: 0.55;
-  }
-  .pill.dashed {
-    border-style: dashed;
-    color: var(--hud-fg-dim);
   }
   .sel {
     -webkit-appearance: none;

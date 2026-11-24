@@ -1,7 +1,7 @@
 <script lang="ts">
   // COLOR: preset strip · live scene preview · four dial cards · bind · save.
   import { ChevronDown, Lock, Pencil, Copy, Trash2, Link2 } from "lucide-svelte";
-  import { renderCrosshair, slotAccent } from "./api";
+  import { slotAccent } from "./api";
   import { app } from "./state.svelte";
   import Strip, { type StripItem } from "./Strip.svelte";
   import Dial from "./Dial.svelte";
@@ -9,7 +9,6 @@
   import ArmChip from "./ArmChip.svelte";
   import ContextMenu, { type MenuItem } from "./ContextMenu.svelte";
   import ProgramPicker from "./ProgramPicker.svelte";
-  import { paintStage, toBitmap, type Bitmap } from "./xhair-canvas";
 
   const SWATCHES = ["#ff4757", "#ffa502", "#fff200", "#2ed573", "#00e5ff", "#1e90ff", "#a55eea"];
 
@@ -55,33 +54,6 @@
     };
   }
 
-  // Selected crosshair drawn 1:1 at scene centre.
-  let xcv = $state<HTMLCanvasElement>();
-  let bmp = $state<Bitmap | null>(null);
-  $effect(() => {
-    const st = app.selectedCrosshair?.style;
-    if (!st || !app.overlayOn) {
-      bmp = null;
-      return;
-    }
-    let live = true;
-    renderCrosshair($state.snapshot(st)).then((img) => {
-      if (live) bmp = toBitmap(img);
-    }).catch(() => {});
-    return () => {
-      live = false;
-    };
-  });
-  $effect(() => {
-    if (!xcv) return;
-    const b = bmp;
-    const dpr = window.devicePixelRatio || 1;
-    const css = b ? b.size / dpr : 1;
-    xcv.style.width = `${css}px`;
-    xcv.style.height = `${css}px`;
-    paintStage(xcv, b, { cssW: css, cssH: css, zoom: 1 });
-  });
-
   const boundTo = (exe: string) => app.presets.find((p) => p.exe === exe)?.name ?? null;
 </script>
 
@@ -108,10 +80,6 @@
     <span class="lbl mono r">
       {#if app.monitor}\\.\{app.monitor.name} · {app.monitor.width}×{app.monitor.height}{:else}PRIMARY DISPLAY{/if}
     </span>
-    <canvas class="xhair" bind:this={xcv}></canvas>
-    {#if bmp && app.selectedCrosshair}
-      <span class="lbl mono cap">XHAIR: {app.selectedCrosshair.name.toUpperCase()} · 1:1</span>
-    {/if}
     <div class="tray">
       <div class="swatches">
         {#each SWATCHES as c}<span class="sw" style="background: {c}"></span>{/each}
@@ -266,13 +234,6 @@
     right: 10px;
     color: var(--telemetry-text);
   }
-  .lbl.cap {
-    left: 10px;
-    bottom: 84px;
-    font-size: 9.5px;
-    letter-spacing: 0.08em;
-    color: rgba(255, 255, 255, 0.65);
-  }
   .corner {
     position: absolute;
     width: 14px;
@@ -284,14 +245,6 @@
   .corner.tr { top: 26px; right: 8px; border-left: 0; border-bottom: 0; }
   .corner.bl { bottom: 78px; left: 8px; border-right: 0; border-top: 0; }
   .corner.br { bottom: 78px; right: 8px; border-left: 0; border-top: 0; }
-  .xhair {
-    position: absolute;
-    left: 50%;
-    top: calc(50% - 35px);
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    image-rendering: pixelated;
-  }
   .tray {
     position: absolute;
     left: 0;

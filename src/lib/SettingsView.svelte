@@ -120,8 +120,6 @@
   const HOTKEYS = [
     ["Cycle presets", "includes Normal, so it doubles as on/off", "F9"],
     ["Snap to Normal", "native gamma + vibrance, instantly", "F10"],
-    ["Toggle crosshair", "overlay master switch", "F11"],
-    ["Cycle crosshairs", "None → each crosshair → None", "F12"],
   ];
 </script>
 
@@ -145,7 +143,7 @@
 
     <span class="sec-label display" data-sec="data">DATA</span>
     <div class="row panel">
-      <span class="txt"><span class="t display">Presets & crosshairs</span><span class="d mono">%APPDATA%\exfil-v2\ · import is additive, never overwrites</span></span>
+      <span class="txt"><span class="t display">Presets</span><span class="d mono">%APPDATA%\exfil-v2\ · import is additive, never overwrites</span></span>
       <span class="acts">
         <button class="chip" onclick={doImport}>IMPORT</button>
         <button class="chip" onclick={doExport}>EXPORT</button>

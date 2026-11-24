@@ -1,12 +1,11 @@
 <script lang="ts">
-  // 52px icon rail: Color / Crosshair / Games · spacer · Settings · vendor dot.
-  import { Palette, Crosshair, Gamepad2, Settings } from "lucide-svelte";
+  // 52px icon rail: Color / Games · spacer · Settings · vendor dot.
+  import { Palette, Gamepad2, Settings } from "lucide-svelte";
   import { app } from "./state.svelte";
   import type { View } from "./prefs";
 
   const items: { id: View; label: string; icon: typeof Palette }[] = [
     { id: "color", label: "Color", icon: Palette },
-    { id: "crosshair", label: "Crosshair", icon: Crosshair },
     { id: "games", label: "Games", icon: Gamepad2 },
   ];
 
@@ -17,7 +16,6 @@
         ? "AMD · ADL saturation ready"
         : "No vibrance driver detected",
   );
-  const isActive = (id: View) => app.view === id || (id === "crosshair" && app.view === "library");
 </script>
 
 <nav class="rail" aria-label="Sections">
@@ -25,10 +23,10 @@
   {#each items as it (it.id)}
     <button
       class="rb"
-      class:active={isActive(it.id)}
+      class:active={app.view === it.id}
       title={it.label}
       aria-label={it.label}
-      aria-current={isActive(it.id) ? "page" : undefined}
+      aria-current={app.view === it.id ? "page" : undefined}
       onclick={() => app.setView(it.id)}
     >
       <it.icon size={18} strokeWidth={1.75} />

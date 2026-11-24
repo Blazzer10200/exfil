@@ -1,24 +1,29 @@
 // UI-only preferences persisted in localStorage (never display state).
 
-export type View = "color" | "crosshair" | "library" | "games" | "settings";
-export type Backdrop = "scene" | "bright" | "dark" | "noise" | "custom";
+export const VIEWS = ["color", "games", "settings"] as const;
+export type View = (typeof VIEWS)[number];
 
 const KEY = "exfil.prefs";
 
 type Prefs = {
   view: View | null;
-  zoom: number;
-  backdrop: Backdrop;
-  backdropImage: string | null;
   grid: boolean;
 };
 
-const DEFAULTS: Prefs = { view: null, zoom: 4, backdrop: "scene", backdropImage: null, grid: true };
+const DEFAULTS: Prefs = { view: null, grid: true };
 
 function read(): Prefs {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : { ...DEFAULTS };
+    if (!raw) return { ...DEFAULTS };
+    // Read field by field: a stored value from an older build (a view that no
+    // longer exists, a non-boolean) falls back to its default instead of
+    // leaking into the app.
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      view: VIEWS.find((v) => v === saved.view) ?? DEFAULTS.view,
+      grid: typeof saved.grid === "boolean" ? saved.grid : DEFAULTS.grid,
+    };
   } catch {
     return { ...DEFAULTS };
   }

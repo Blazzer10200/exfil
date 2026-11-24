@@ -6,8 +6,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { getVersion } from "@tauri-apps/api/app";
-  import { AppWindow, Crosshair, RotateCcw, Power } from "lucide-svelte";
-  import { getCrosshairs, getPresets, NO_CROSSHAIR } from "$lib/api";
+  import { AppWindow, RotateCcw, Power } from "lucide-svelte";
+  import { getPresets } from "$lib/api";
 
   const MARGIN = 12; // transparent gutter so the CSS shadow has room to render
   const win = getCurrentWindow();
@@ -16,19 +16,15 @@
   let version = $state("");
   let openSeq = $state(0); // bumped per open so the entrance animation replays
   let preset = $state("—");
-  let xhair = $state("NONE");
-  let overlayOn = $state(false);
 
-  function act(action: "show" | "reset" | "quit" | "crosshair") {
+  function act(action: "show" | "reset" | "quit") {
     invoke("tray_action", { action }).catch(() => win.hide());
   }
 
   async function refresh() {
     try {
-      const [p, c] = await Promise.all([getPresets(), getCrosshairs()]);
+      const p = await getPresets();
       preset = (p.presets.find((x) => x.slot === p.active)?.name ?? "Normal").toUpperCase();
-      overlayOn = c.enabled;
-      xhair = c.selected === NO_CROSSHAIR ? "NONE" : (c.crosshairs.find((x) => x.id === c.selected)?.name ?? "NONE").toUpperCase();
     } catch {
       // the menu still works without the readout
     }
@@ -79,12 +75,9 @@
     </div>
     <div class="active mono">
       <span class="k">ACTIVE</span>
-      <span class="v">{preset} · {xhair}</span>
+      <span class="v">{preset}</span>
     </div>
     <button class="item" role="menuitem" onclick={() => act("show")}><AppWindow size={13} /> SHOW EXFIL</button>
-    <button class="item" role="menuitem" onclick={() => act("crosshair")}>
-      <Crosshair size={13} /> CROSSHAIR <span class="state" class:on={overlayOn}>{overlayOn ? "ON" : "OFF"}</span>
-    </button>
     <button class="item" role="menuitem" onclick={() => act("reset")}><RotateCcw size={13} /> RESET DISPLAY</button>
     <div class="sep"></div>
     <button class="item danger" role="menuitem" onclick={() => act("quit")}><Power size={13} /> QUIT</button>
@@ -196,15 +189,6 @@
   }
   .item.danger:hover {
     background: var(--danger-soft);
-  }
-  .state {
-    margin-left: auto;
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    color: var(--hud-fg-faint);
-  }
-  .state.on {
-    color: var(--ok);
   }
   .sep {
     height: 1px;

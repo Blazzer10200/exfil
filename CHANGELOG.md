@@ -4,6 +4,14 @@ All notable changes to EXFIL. Earlier releases are described in their git tags.
 
 ## [Unreleased]
 
+### Removed
+- **Crosshair overlay.** The Crosshair tab, the crosshair library, the overlay
+  window, per-game crosshair bindings, the tray CROSSHAIR item and the
+  **Ctrl+Shift+F11** / **Ctrl+Shift+F12** hotkeys are gone. EXFIL is a color
+  tool again: presets, per-game auto-switch, and the two color hotkeys.
+  A `crosshairs.json` left in `%APPDATA%\exfil-v2\` by an earlier version is
+  no longer read and can be deleted.
+
 ### Fixed
 - **White box / hung app on start-with-Windows.** The main window was created
   visible and only hidden at the end of startup, and the tray popup webview was

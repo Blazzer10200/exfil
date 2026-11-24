@@ -32,7 +32,7 @@ fn running_exes() -> Vec<String> {
 }
 
 /// Exe basename (lowercased) of one pid, via the same read-only snapshot —
-/// deliberately NOT OpenProcess, so the crosshair overlay never opens a handle
+/// deliberately NOT OpenProcess, so the foreground tracker never opens a handle
 /// on an anti-cheat-protected game while it polls the foreground window.
 pub fn exe_for_pid(pid: u32) -> Option<String> {
     process_list().into_iter().find(|(p, _)| *p == pid).map(|(_, name)| name)

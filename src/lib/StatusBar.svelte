@@ -36,7 +36,7 @@
   <span class="grow"></span>
   {#if app.hotkeys}
     <span class="item keys">
-      HOTKEYS <b>F9</b> · <b>F10</b> · <b>F11</b> · <b>F12</b>
+      HOTKEYS <b>F9</b> · <b>F10</b>
     </span>
   {/if}
 </footer>

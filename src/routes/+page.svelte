@@ -5,7 +5,6 @@
   import Titlebar from "$lib/Titlebar.svelte";
   import StatusBar from "$lib/StatusBar.svelte";
   import ColorView from "$lib/ColorView.svelte";
-  import CrosshairView from "$lib/CrosshairView.svelte";
   import GamesView from "$lib/GamesView.svelte";
   import SettingsView from "$lib/SettingsView.svelte";
   import { app } from "$lib/state.svelte";
@@ -22,12 +21,10 @@
   <div class="column">
     <Titlebar />
     {#if ready}
-      {#key app.view === "library" ? "crosshair" : app.view}
+      {#key app.view}
         <div class="view">
           {#if app.view === "color"}
             <ColorView />
-          {:else if app.view === "crosshair" || app.view === "library"}
-            <CrosshairView />
           {:else if app.view === "games"}
             <GamesView />
           {:else}
