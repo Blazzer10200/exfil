@@ -19,7 +19,7 @@
 2. Windows will likely show a SmartScreen warning ("Windows protected your PC") because the
    installer is unsigned — click **More info → Run anyway**.
 3. That's it. EXFIL lives in the system tray, starts with Windows (toggleable in
-   Settings — the titlebar cogwheel), and installs per-user (no admin needed). The
+   Settings — the gear at the bottom of the icon rail), and installs per-user (no admin needed). The
    installer embeds the WebView2 bootstrapper, so it works on machines that don't
    have WebView2 yet.
 
@@ -43,7 +43,7 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   controls. Persisted per-user; the last-active preset re-applies on boot.
 - **Per-game auto-switch** — bind a preset to a program and EXFIL applies it automatically
   while that program runs, reverting when it exits. Create a preset straight from a running
-  game (**Add preset → From a running program…**), or bind/unbind from the preset's
+  game (**+ NEW → From a running program…**, or **+ BIND GAME** on the Games page), or bind/unbind from the preset's
   right-click menu or the main panel. Detection is a read-only window/process enumeration —
   no injection, no hooks.
 - **Global hotkeys** — **Ctrl+Shift+F9** cycles through your presets, **Ctrl+Shift+F10**
@@ -58,7 +58,7 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   overwrites, and rescales vibrance when the file came from a machine with the other
   GPU vendor.
 - **Auto-update** — checks GitHub Releases on launch and installs from
-  **Settings → Updates**; every update is signature-verified before it runs.
+  **Settings → About**; every update is signature-verified before it runs.
 
 ## Anti-cheat safety
 
@@ -71,10 +71,12 @@ BattlEye / EAC-safe.
 
 ## Build from source
 
+Needs Windows 10/11, Node 22+ and a stable Rust toolchain.
+
 ```bash
 npm install
-npx @tauri-apps/cli dev      # hot-reload dev
-npx @tauri-apps/cli build    # release exe + NSIS installer
+npm run tauri dev      # hot-reload dev
+npm run tauri build    # release exe + NSIS installer
 ```
 
 Outputs land in `src-tauri/target/release/` (or `%CARGO_TARGET_DIR%\release\` if you set
@@ -85,6 +87,45 @@ Tagged pushes (`v*`) build the installer on CI and attach it to a draft GitHub R
 
 **Stack:** Svelte 5 (runes) · SvelteKit (adapter-static SPA) · Vite · hand-authored OKLCH
 CSS · TypeScript · Tauri 2 · Rust 2021 · `windows` crate (GDI) · raw NVAPI + AMD ADL FFI.
+
+### Checks
+
+The same four checks run in CI ([`ci.yml`](.github/workflows/ci.yml)) on every push to
+`main` and every pull request:
+
+| Check | Command |
+| --- | --- |
+| Frontend typecheck | `npm run check` |
+| Rust format | `npm run fmt:rust -- --check` |
+| Rust lint | `npm run lint:rust` |
+| Rust tests | `npm run test:rust` |
+
+The Rust commands need a built frontend (`npm run build`) because the backend embeds it.
+
+### Project layout
+
+```
+src/                     Svelte frontend
+  routes/+page.svelte    app shell: icon rail, titlebar, view, status bar
+  routes/tray/           the styled tray-menu popup (its own window)
+  lib/*View.svelte       the three pages: Color, Games, Settings
+  lib/state.svelte.ts    app-wide state and actions
+  lib/api.ts             typed wrappers over the backend commands
+  lib/prefs.ts           UI-only preferences (localStorage)
+  app.css                design tokens and shared classes
+src-tauri/src/           Rust backend
+  lib.rs                 startup wiring
+  state.rs               shared state + the display operations everything uses
+  commands.rs            IPC commands (presets, bindings, import/export, system)
+  hotkeys.rs             global shortcuts
+  tray.rs                tray icon + menu popup
+  updater.rs             signed auto-update
+  store.rs               preset model + persistence
+  gamma.rs               GDI gamma ramps
+  vibrance.rs            vendor-neutral vibrance over nvapi.rs / amd.rs
+  watcher.rs             per-program auto-switch
+  foreground.rs          foreground-program tracker
+```
 
 ## Data
 

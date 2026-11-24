@@ -32,7 +32,7 @@ debloated/offline machine might not).
 - **Presets are per-user.** Stored at `%APPDATA%\exfil-v2\presets.json`,
   created fresh on first run.
 - **It updates itself.** From v2.3.0 the app checks GitHub Releases on launch
-  and installs new versions from **Settings → Updates** (every update is
+  and installs new versions from **Settings → About** (every update is
   signature-verified before it runs). You only need to hand out the installer
   once — copies older than 2.3.0 need one manual reinstall to get on the
   update train.
@@ -44,7 +44,7 @@ debloated/offline machine might not).
    protected your PC." Click **More info → Run anyway**. Some AV heuristics
    may also flag it because the app does raw NVAPI DLL calls + read-only
    process enumeration (for the per-game auto-switch) — both are legitimate
-   here (see `CLAUDE.md`'s no-injection constraint) but look similar to
+   here (see **Anti-cheat safety** in the [README](./README.md)) but look similar to
    patterns malware uses, so a false positive isn't surprising.
 2. **HDR displays may see odd gamma behavior.** `SetDeviceGammaRamp` has
    documented undefined behavior on some GPU/driver combos when HDR is
@@ -52,7 +52,7 @@ debloated/offline machine might not).
    it's a full reset, not a stored preset.
 3. **First launch creates its own preset file** — nothing carries over from
    your machine. If you want to share your presets, use **Export** (Settings,
-   the titlebar cogwheel) → hand them the JSON → they **Import** it on their
+   the gear at the bottom of the icon rail) → hand them the JSON → they **Import** it on their
    end. Import is additive, so it won't clobber anything they've already made,
    and it rescales vibrance if their GPU vendor (and therefore vibrance scale)
    differs from yours.

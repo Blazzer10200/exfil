@@ -1,13 +1,16 @@
 {
   "name": "exfil-v2",
   "version": "2.5.1",
-  "description": "EXFIL — per-game color/gamma/vibrance preset tool. Tauri + Svelte rewrite.",
+  "description": "EXFIL — per-game color/gamma/vibrance preset tool",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "fmt:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
+    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "tauri": "tauri"
   },
   "license": "MIT",
