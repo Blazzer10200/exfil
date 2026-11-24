@@ -38,6 +38,10 @@ sharing presets — in [`DISTRIBUTING.md`](./DISTRIBUTING.md).
   `QueryInterface`); on AMD via ADL display saturation (raw `atiadlxx.dll`, the same
   control Radeon software exposes). Either way it's applied to **every connected
   output** so a second monitor never keeps a stale value.
+- **Smooth gradients** (NVIDIA) — a gamma ramp on an 8-bit signal merges neighbouring
+  shades, which can show as banding in skies and shadows. The Color page shows how many
+  of the 256 shades a preset keeps, and **Settings → Smooth gradients** switches on the
+  driver's temporal dithering to hide the steps. Off by default.
 - **Your own presets** — a fixed read-only **Normal** baseline (restores each monitor's
   native color) plus presets you create, rename, and delete, tuned live from the color
   controls. Persisted per-user; the last-active preset re-applies on boot.

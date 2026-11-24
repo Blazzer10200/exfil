@@ -23,6 +23,7 @@ export interface PresetStore {
   next_id: number;
   autostart: boolean;
   hotkeys: boolean;
+  dither: boolean;
 }
 
 export interface VibranceInfo {
@@ -36,6 +37,8 @@ export interface SystemStatus {
   /** GPU vendor providing vibrance, or null when only gamma is available. */
   vendor: "nvidia" | "amd" | null;
   vibrance: VibranceInfo | null;
+  /** The GPU driver's dithering can be switched from EXFIL (NVIDIA only). */
+  dither_supported: boolean;
 }
 
 export const getStatus = () => invoke<SystemStatus>("get_status");
@@ -51,6 +54,16 @@ export const savePreset = (slot: string, dials: ColorDials, vibrance: number) =>
   invoke<void>("save_preset", { slot, dials, vibrance });
 
 export const resetDisplay = () => invoke<void>("reset_display");
+
+// How many of the 256 shades these dials keep on an 8-bit signal (256 = none
+// lost). Pure math on the backend, nothing is applied.
+export const countShades = (dials: ColorDials) =>
+  invoke<number>("count_shades", { dials });
+
+// Driver dithering (NVIDIA): smooths the banding a preset causes on an 8-bit
+// signal. Applied live and persisted; setDither returns the new value.
+export const setDither = (enabled: boolean) =>
+  invoke<boolean>("set_dither", { enabled });
 
 // Preset CRUD. create returns the new preset; delete returns the fresh store.
 export const createPreset = (name: string) =>

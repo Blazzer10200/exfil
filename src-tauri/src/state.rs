@@ -1,6 +1,7 @@
 //! Shared app state plus the display operations every entry point funnels
 //! through (IPC commands, hotkeys, the auto-switch watcher, tray, exit).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::gamma::{self, ColorDials};
@@ -18,6 +19,9 @@ pub struct AppState {
     /// Exe basename of the foreground window (None = desktop / shell / EXFIL),
     /// kept current by the foreground thread and mirrored to the UI as "in-front".
     pub in_front: Mutex<Option<String>>,
+    /// True while EXFIL has the driver's dithering switched on, so exit only
+    /// hands back what EXFIL itself changed.
+    dither_on: AtomicBool,
 }
 
 /// Lock a mutex, recovering the guard on poison instead of panicking. With
@@ -44,6 +48,7 @@ impl AppState {
             manual_active: Mutex::new(store.active.clone()),
             store: Mutex::new(store),
             in_front: Mutex::new(None),
+            dither_on: AtomicBool::new(false),
         }
     }
 
@@ -126,6 +131,44 @@ impl AppState {
             if let Err(e) = v.set(p.vibrance) {
                 log::warn!("boot-time vibrance apply failed: {e}");
             }
+        }
+    }
+
+    /// Whether the GPU driver's dithering can be switched from here.
+    pub fn dither_supported(&self) -> bool {
+        self.vibrance.as_ref().is_some_and(|v| v.supports_dither())
+    }
+
+    /// Switch the driver's dithering on, or hand it back to the driver default.
+    pub fn set_dither(&self, on: bool) -> Result<(), String> {
+        let v = self
+            .vibrance
+            .as_ref()
+            .ok_or("dithering control needs an NVIDIA GPU")?;
+        v.set_dither(on)?;
+        self.dither_on.store(on, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Turn dithering on at startup when the stored setting asks for it. With
+    /// the setting off the driver is never touched.
+    pub fn apply_dither_on_boot(&self) {
+        if !lock(&self.store).dither {
+            return;
+        }
+        if let Err(e) = self.set_dither(true) {
+            log::warn!("boot-time dithering enable failed: {e}");
+        }
+    }
+
+    /// Exit-time restore: hand dithering back to the driver, but only if EXFIL
+    /// was the one that switched it on.
+    pub fn release_dither(&self) {
+        if !self.dither_on.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Err(e) = self.set_dither(false) {
+            log::warn!("dithering reset failed: {e}");
         }
     }
 

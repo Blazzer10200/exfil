@@ -73,6 +73,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
             commands::get_presets,
+            commands::count_shades,
+            commands::set_dither,
             commands::apply_color,
             commands::select_preset,
             commands::save_preset,
@@ -133,6 +135,7 @@ pub fn run() {
             }
 
             state.apply_active_on_boot();
+            state.apply_dither_on_boot();
             // Re-assert the active ramp on an interval so fullscreen-exclusive
             // games can't permanently steal the gamma on focus.
             gamma::start_pulse(GAMMA_PULSE_MS);
@@ -179,7 +182,9 @@ pub fn run() {
             // shutdown, app.exit) never leaves a preset's gamma/vibrance stamped
             // on the monitors with no app left to clear it.
             if let tauri::RunEvent::Exit = event {
-                app.state::<AppState>().reset_display();
+                let state = app.state::<AppState>();
+                state.reset_display();
+                state.release_dither();
             }
         });
 }

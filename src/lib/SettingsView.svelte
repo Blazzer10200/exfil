@@ -5,7 +5,7 @@
   import { getVersion } from "@tauri-apps/api/app";
   import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
   import { ExternalLink } from "lucide-svelte";
-  import { exportPresets, getAutostart, importPresets, openUrl, setAutostart, setHotkeys, uninstallApp } from "./api";
+  import { exportPresets, getAutostart, importPresets, openUrl, setAutostart, setDither, setHotkeys, uninstallApp } from "./api";
   import { app } from "./state.svelte";
   import { toast, reason } from "./toast.svelte";
   import Strip, { type StripItem } from "./Strip.svelte";
@@ -57,6 +57,13 @@
       app.hotkeys = await setHotkeys(!app.hotkeys);
     } catch (e) {
       toast.error(`✕ HOTKEYS · ${reason(e)}`);
+    }
+  }
+  async function toggleDither() {
+    try {
+      app.dither = await setDither(!app.dither);
+    } catch (e) {
+      toast.error(`✕ DITHERING · ${reason(e)}`);
     }
   }
   async function doExport() {
@@ -111,6 +118,14 @@
     <div class="row panel">
       <span class="txt"><span class="t display">Grid texture</span><span class="d mono">faint 24px grid behind the views</span></span>
       <button class="toggle" class:on={app.grid} aria-label="Grid texture" onclick={() => app.setGrid(!app.grid)}></button>
+    </div>
+    <div class="row panel">
+      <span class="txt"
+        ><span class="t display">Smooth gradients</span><span class="d mono"
+          >{app.status?.dither_supported ? "NVIDIA driver dithering · hides the banding presets cause" : "needs an NVIDIA GPU"}</span
+        ></span
+      >
+      <button class="toggle" class:on={app.dither} disabled={!app.status?.dither_supported} aria-label="Smooth gradients" onclick={toggleDither}></button>
     </div>
 
     <span class="sec-label display" data-sec="data">DATA</span>

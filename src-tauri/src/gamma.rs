@@ -57,6 +57,26 @@ fn build_ramp(d: ColorDials) -> GammaRamp {
     [channel, channel, channel]
 }
 
+/// How many of the 256 input shades survive `d` on an 8-bit signal. 256 means
+/// nothing is lost; lower means neighbouring shades merge, which shows up as
+/// banding in smooth gradients unless the driver dithers.
+pub fn distinct_shades(d: ColorDials) -> u16 {
+    let ramp = build_ramp(d);
+    let mut seen = [false; 256];
+    let mut count = 0u16;
+    for v in ramp[0] {
+        // 16-bit ramp entry to the nearest 8-bit level (65535 / 255 = 257).
+        let level = ((u32::from(v) + 128) / 257).min(255) as usize;
+        if let Some(slot) = seen.get_mut(level) {
+            if !*slot {
+                *slot = true;
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 /// Open a gamma-capable DC for every real monitor.
 ///
 /// We probe `\\.\DISPLAY1..16` directly rather than `EnumDisplayDevicesW(null,…)`
@@ -160,6 +180,20 @@ pub fn start_pulse(interval_ms: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shades_lost_per_preset_on_an_8_bit_signal() {
+        let dials = |gamma, brightness, contrast| ColorDials {
+            gamma,
+            brightness,
+            contrast,
+        };
+        // Neutral keeps every shade; the numbers below were measured against
+        // the live ramp on real hardware (2026-11-24).
+        assert_eq!(distinct_shades(ColorDials::default()), 256);
+        assert_eq!(distinct_shades(dials(1.0, 0.02, 0.98)), 248);
+        assert_eq!(distinct_shades(dials(1.15, 0.02, 1.02)), 239);
+    }
 
     #[test]
     fn neutral_dials_build_a_linear_ramp() {

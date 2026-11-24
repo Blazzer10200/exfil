@@ -107,6 +107,11 @@ pub struct PresetStore {
     /// Global hotkeys enabled (Ctrl+Shift+F9 cycle / Ctrl+Shift+F10 Normal).
     #[serde(default = "default_true")]
     pub hotkeys: bool,
+    /// Ask the GPU driver to dither (NVIDIA only). Smooths the banding a preset
+    /// causes on an 8-bit signal. Off by default: EXFIL leaves the driver's own
+    /// dithering alone until the user turns this on.
+    #[serde(default)]
+    pub dither: bool,
 }
 
 fn normal_preset() -> Preset {
@@ -127,6 +132,7 @@ impl Default for PresetStore {
             next_id: 1,
             autostart: true,
             hotkeys: true,
+            dither: false,
         }
     }
 }
@@ -573,6 +579,7 @@ mod tests {
             .unwrap()
             .normalized();
         assert!(s.autostart && s.hotkeys);
+        assert!(!s.dither);
         assert_eq!(s.active, "p4");
         assert_eq!(s.get("p4").unwrap().exe, None);
         assert_eq!(add(&mut s, "New").slot, "p5"); // never collides with p4

@@ -134,6 +134,17 @@
       onchange={() => app.liveApply()}
     />
 
+    <div
+      class="shades mono"
+      class:lossy={app.shades < 256}
+      title={app.shades < 256
+        ? `This preset keeps ${app.shades} of 256 shades on an 8-bit signal. Merged shades can show as banding${app.dither ? "; driver dithering is on and smooths it" : "; turn on Smooth gradients in Settings to hide it"}.`
+        : "No shades lost"}
+    >
+      <span class="k">SHADES</span><span class="v">· {app.shades}/256</span>
+      <span class="grow"></span>
+      {#if app.shades < 256}<span class="v">{app.dither ? "DITHERED" : "BANDING POSSIBLE"}</span>{/if}
+    </div>
     {#if !app.readOnly}
       <div class="bind mono" class:bound={!!app.current?.exe}>
         {#if app.current?.exe}
@@ -300,6 +311,19 @@
     letter-spacing: 0.12em;
     color: var(--hud-fg-dim);
     white-space: nowrap;
+  }
+  .shades {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--hud-fg-dim);
+    white-space: nowrap;
+  }
+  .shades.lossy .v {
+    color: var(--accent);
   }
   .grow {
     flex: 1;

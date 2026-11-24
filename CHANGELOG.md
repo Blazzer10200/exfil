@@ -4,6 +4,14 @@ All notable changes to EXFIL. Earlier releases are described in their git tags.
 
 ## [Unreleased]
 
+### Added
+- **Smooth gradients** (Settings → General, NVIDIA only). Switches on the GPU
+  driver's temporal dithering, which hides the banding a preset can cause on an
+  8-bit signal. Off by default; EXFIL hands dithering back to the driver when
+  you turn it off or quit. Driver-level like everything else: no injection.
+- **Shades readout** on the Color page. Shows how many of the 256 shades the
+  current gamma, brightness and contrast keep (256 means none are lost).
+
 ### Removed
 - **Crosshair overlay.** The Crosshair tab, the crosshair library, the overlay
   window, per-game crosshair bindings, the tray CROSSHAIR item and the

@@ -96,6 +96,20 @@ impl Vibrance {
         }
     }
 
+    /// Whether this backend can switch the driver's dithering (NVIDIA only).
+    pub fn supports_dither(&self) -> bool {
+        matches!(self, Vibrance::Nvidia(_))
+    }
+
+    /// Turn the driver's temporal dithering on, or hand it back to the driver
+    /// default, on every connected output.
+    pub fn set_dither(&self, on: bool) -> Result<(), String> {
+        match self {
+            Vibrance::Nvidia(nv) => nv.set_dither(on),
+            Vibrance::Amd(_) => Err("dithering control needs an NVIDIA GPU".into()),
+        }
+    }
+
     /// The driver's neutral level — what a fresh preset seeds with (seeding a
     /// literal 0 would mean MINIMUM saturation: washed-out on NVIDIA's
     /// 0..=100-default-50 scale, grayscale on AMD's). The hardcoded fallbacks

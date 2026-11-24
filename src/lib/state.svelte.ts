@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   applyColor,
   checkUpdate,
+  countShades,
   createPreset,
   deletePreset,
   getInFront,
@@ -52,6 +53,10 @@ class AppStore {
   updatePhase = $state<UpdatePhase>("idle");
   updateProgress = $state(0);
   hotkeys = $state(true);
+  /** Driver dithering is switched on (Settings → General). */
+  dither = $state(false);
+  /** Shades (of 256) the current dials keep on an 8-bit signal. */
+  shades = $state(256);
   view = $state<View>("games");
   grid = $state(prefs.grid);
 
@@ -101,6 +106,14 @@ class AppStore {
   #loadInto(p: Preset) {
     this.dials = { ...p.dials };
     this.vibrance = p.vibrance;
+    void this.#refreshShades();
+  }
+  async #refreshShades() {
+    try {
+      this.shades = await countShades($state.snapshot(this.dials));
+    } catch (e) {
+      toast.error(`✕ SHADES READOUT · ${reason(e)}`);
+    }
   }
   /** Make `p` the active preset on the display and in the UI. */
   async #activate(p: Preset) {
@@ -126,6 +139,7 @@ class AppStore {
       this.presets = store.presets;
       this.active = store.active;
       this.hotkeys = store.hotkeys;
+      this.dither = store.dither;
       const p = this.presets.find((x) => x.slot === this.active);
       if (p) this.#loadInto(p);
       this.status = await getStatus();
@@ -202,6 +216,7 @@ class AppStore {
     this.#applyTimer = setTimeout(async () => {
       try {
         await applyColor($state.snapshot(this.dials), this.vibrance);
+        await this.#refreshShades();
       } catch (e) {
         toast.error(`✕ APPLY FAILED · ${reason(e)}`);
       }
