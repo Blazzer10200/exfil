@@ -1,0 +1,6 @@
+# Keep LF in the repo and in checkouts, so tools that write LF (tauri build
+# rewrites Cargo.toml) do not show phantom changes on Windows.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
