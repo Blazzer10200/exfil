@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.jpg" width="740" alt="EXFIL main window" />
+  <img src="docs/screenshot.png" width="740" alt="EXFIL Color page: preset tabs, live preview and the gamma, brightness, contrast and vibrance dials" />
 </p>
 
 ## Install

@@ -12,7 +12,35 @@ All notable changes to EXFIL. Earlier releases are described in their git tags.
   A `crosshairs.json` left in `%APPDATA%\exfil-v2\` by an earlier version is
   no longer read and can be deleted.
 
+### Changed
+- **Global hotkeys are down to two**: **Ctrl+Shift+F9** cycles presets and
+  **Ctrl+Shift+F10** snaps to Normal.
+- The Games page shows one preset per program; picking another preset in the
+  row's dropdown moves the program to it.
+- Internal cleanup with no behaviour change: the backend is split into focused
+  modules, the frontend lost its unused options, and CI now runs the
+  typecheck, rustfmt, clippy and the unit tests on every push.
+
 ### Fixed
+- **A damaged `presets.json` is no longer overwritten.** If the file can't be
+  read or parsed, EXFIL keeps a copy as `presets.json.bad` before starting
+  from defaults, and it repairs a file with a missing Normal preset or a
+  reused preset key.
+- **Quitting could leave a preset's gamma on screen.** The once-a-second
+  re-apply could run between the exit reset and the process ending and write
+  the old ramp back.
+- **A failed update check no longer reports "UP TO DATE"**, and an update
+  download keeps its progress if you leave the Settings page.
+- **Auto-switch picked the wrong game** after a program was unbound and bound
+  again while another bound game was running.
+- **"In front" could show a stale program** for a few seconds when switching
+  between the desktop and a File Explorer window.
+- Rename and Bind from a preset's right-click menu could act on a different
+  preset if selecting it failed.
+- NVIDIA loader: a driver DLL without `NvAPI_Initialize` is now handled
+  instead of being undefined behaviour; a driver reporting an inverted
+  vibrance range is an error instead of a crash.
+- AMD: a small leak when a display query failed.
 - **White box / hung app on start-with-Windows.** The main window was created
   visible and only hidden at the end of startup, and the tray popup webview was
   built inline, so a slow WebView2 at boot stalled startup with an empty white
