@@ -39,6 +39,8 @@ export interface SystemStatus {
   vibrance: VibranceInfo | null;
   /** The GPU driver's dithering can be switched from EXFIL (NVIDIA only). */
   dither_supported: boolean;
+  /** Bits per channel the outputs carry (8 when the driver can't say). */
+  output_bits: number;
 }
 
 export const getStatus = () => invoke<SystemStatus>("get_status");
@@ -55,10 +57,10 @@ export const savePreset = (slot: string, dials: ColorDials, vibrance: number) =>
 
 export const resetDisplay = () => invoke<void>("reset_display");
 
-// How many of the 256 shades these dials keep on an 8-bit signal (256 = none
-// lost). Pure math on the backend, nothing is applied.
-export const countShades = (dials: ColorDials) =>
-  invoke<number>("count_shades", { dials });
+// How many of the 256 shades these dials keep on a signal carrying `bits` per
+// channel (256 = none lost). Pure math on the backend, nothing is applied.
+export const countShades = (dials: ColorDials, bits: number) =>
+  invoke<number>("count_shades", { dials, bits });
 
 // Driver dithering (NVIDIA): smooths the banding a preset causes on an 8-bit
 // signal. Applied live and persisted; setDither returns the new value.

@@ -57,24 +57,20 @@ fn build_ramp(d: ColorDials) -> GammaRamp {
     [channel, channel, channel]
 }
 
-/// How many of the 256 input shades survive `d` on an 8-bit signal. 256 means
-/// nothing is lost; lower means neighbouring shades merge, which shows up as
-/// banding in smooth gradients unless the driver dithers.
-pub fn distinct_shades(d: ColorDials) -> u16 {
-    let ramp = build_ramp(d);
-    let mut seen = [false; 256];
-    let mut count = 0u16;
-    for v in ramp[0] {
-        // 16-bit ramp entry to the nearest 8-bit level (65535 / 255 = 257).
-        let level = ((u32::from(v) + 128) / 257).min(255) as usize;
-        if let Some(slot) = seen.get_mut(level) {
-            if !*slot {
-                *slot = true;
-                count += 1;
-            }
-        }
-    }
-    count
+/// How many of the 256 input shades survive `d` on a signal carrying `bits`
+/// per channel (6..=12; 8 is the usual SDR link). 256 means nothing is lost;
+/// lower means neighbouring shades merge, which shows up as banding in smooth
+/// gradients unless the driver dithers.
+pub fn distinct_shades(d: ColorDials, bits: u8) -> u16 {
+    let top = (1u32 << bits.clamp(6, 12)) - 1;
+    // Each 16-bit ramp entry lands on its nearest signal level. The ramp never
+    // decreases, so shades that merge are always neighbours.
+    let mut levels: Vec<u32> = build_ramp(d)[0]
+        .iter()
+        .map(|&v| (u32::from(v) * top + 32767) / 65535)
+        .collect();
+    levels.dedup();
+    levels.len() as u16
 }
 
 /// Open a gamma-capable DC for every real monitor.
@@ -190,9 +186,12 @@ mod tests {
         };
         // Neutral keeps every shade; the numbers below were measured against
         // the live ramp on real hardware (2026-11-24).
-        assert_eq!(distinct_shades(ColorDials::default()), 256);
-        assert_eq!(distinct_shades(dials(1.0, 0.02, 0.98)), 248);
-        assert_eq!(distinct_shades(dials(1.15, 0.02, 1.02)), 239);
+        assert_eq!(distinct_shades(ColorDials::default(), 8), 256);
+        assert_eq!(distinct_shades(dials(1.0, 0.02, 0.98), 8), 248);
+        assert_eq!(distinct_shades(dials(1.15, 0.02, 1.02), 8), 239);
+        // A 10-bit link has four times the levels, so far fewer shades merge.
+        assert_eq!(distinct_shades(ColorDials::default(), 10), 256);
+        assert_eq!(distinct_shades(dials(1.0, 0.02, 0.98), 10), 254);
     }
 
     #[test]

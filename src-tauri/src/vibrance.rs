@@ -110,6 +110,15 @@ impl Vibrance {
         }
     }
 
+    /// Bits per channel the outputs carry, for the shades readout. 8 (the
+    /// usual SDR link) when the driver can't say.
+    pub fn output_bits(&self) -> u8 {
+        match self {
+            Vibrance::Nvidia(nv) => nv.output_bits().unwrap_or(8),
+            Vibrance::Amd(_) => 8,
+        }
+    }
+
     /// The driver's neutral level — what a fresh preset seeds with (seeding a
     /// literal 0 would mean MINIMUM saturation: washed-out on NVIDIA's
     /// 0..=100-default-50 scale, grayscale on AMD's). The hardcoded fallbacks

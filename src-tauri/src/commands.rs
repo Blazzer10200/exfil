@@ -17,6 +17,8 @@ pub struct SystemStatus {
     vibrance: Option<VibranceInfo>,
     /// The GPU driver's dithering can be switched from EXFIL (NVIDIA only).
     dither_supported: bool,
+    /// Bits per channel the outputs carry (8 when the driver can't say).
+    output_bits: u8,
 }
 
 #[tauri::command]
@@ -25,14 +27,15 @@ pub fn get_status(state: State<AppState>) -> SystemStatus {
         vendor: state.vibrance.as_ref().map(|v| v.vendor()),
         vibrance: state.vibrance.as_ref().and_then(|v| v.get().ok()),
         dither_supported: state.dither_supported(),
+        output_bits: state.vibrance.as_ref().map_or(8, |v| v.output_bits()),
     }
 }
 
-/// How many of the 256 shades these dials keep on an 8-bit signal (256 = none
-/// lost). Pure math, nothing is applied.
+/// How many of the 256 shades these dials keep on a signal carrying `bits`
+/// per channel (256 = none lost). Pure math, nothing is applied.
 #[tauri::command]
-pub fn count_shades(dials: ColorDials) -> u16 {
-    crate::gamma::distinct_shades(dials)
+pub fn count_shades(dials: ColorDials, bits: u8) -> u16 {
+    crate::gamma::distinct_shades(dials, bits)
 }
 
 /// Toggle driver dithering: applies it live and persists the choice so boot

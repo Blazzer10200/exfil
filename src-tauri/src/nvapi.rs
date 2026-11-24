@@ -318,9 +318,36 @@ impl Nvapi {
         Ok(ctl)
     }
 
+    /// Bits per channel of the signal on the output carrying the fewest, for
+    /// the shades readout. None when no output answers.
+    pub fn output_bits(&self) -> Option<u8> {
+        self.all_displays()
+            .into_iter()
+            .filter_map(|d| self.dither_target(d).ok())
+            .filter_map(|t| self.bpc_for(t).ok())
+            .map(|bpc| match bpc {
+                NV_BPC_6 => 6,
+                NV_BPC_10 => 10,
+                b if b > NV_BPC_10 => 12,
+                _ => 8,
+            })
+            .min()
+    }
+
     /// Dither depth that matches the signal the driver is sending right now.
     /// Dithering to fewer bits than the link carries would throw precision away.
     fn dither_bits_for(&self, target: DitherTarget) -> Result<i32, String> {
+        Ok(match self.bpc_for(target)? {
+            NV_BPC_6 => DITHER_BITS_6,
+            // 12-bit and up have no matching dither depth; 10 is the highest.
+            b if b >= NV_BPC_10 => DITHER_BITS_10,
+            _ => DITHER_BITS_8,
+        })
+    }
+
+    /// NV_BPC code of the signal on one output. Read-only: ColorControl is
+    /// only ever sent with NV_COLOR_CMD_GET.
+    fn bpc_for(&self, target: DitherTarget) -> Result<u32, String> {
         let color_fn: FnColorControl = self
             .resolve(0x92F9_D80D)
             .ok_or("ColorControl unavailable")?;
@@ -339,12 +366,7 @@ impl Nvapi {
         if st != NVAPI_OK {
             return Err(format!("ColorControl failed: {st}"));
         }
-        Ok(match data.bpc {
-            NV_BPC_6 => DITHER_BITS_6,
-            // 12-bit and up have no matching dither depth; 10 is the highest.
-            b if b >= NV_BPC_10 => DITHER_BITS_10,
-            _ => DITHER_BITS_8,
-        })
+        Ok(data.bpc)
     }
 
     fn set_dither_for(&self, display: NvDisplayHandle, on: bool) -> Result<(), String> {

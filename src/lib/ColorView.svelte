@@ -138,7 +138,7 @@
       class="shades mono"
       class:lossy={app.shades < 256}
       title={app.shades < 256
-        ? `This preset keeps ${app.shades} of 256 shades on an 8-bit signal. Merged shades can show as banding${app.dither ? "; driver dithering is on and smooths it" : "; turn on Smooth gradients in Settings to hide it"}.`
+        ? `This preset keeps ${app.shades} of 256 shades on this {app.outputBits}-bit signal. Merged shades can show as banding${app.dither ? "; driver dithering is on and smooths it" : "; turn on Smooth gradients in Settings to hide it"}.`
         : "No shades lost"}
     >
       <span class="k">SHADES</span><span class="v">· {app.shades}/256</span>

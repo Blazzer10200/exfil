@@ -55,13 +55,15 @@ class AppStore {
   hotkeys = $state(true);
   /** Driver dithering is switched on (Settings → General). */
   dither = $state(false);
-  /** Shades (of 256) the current dials keep on an 8-bit signal. */
+  /** Shades (of 256) the current dials keep at the output's bit depth. */
   shades = $state(256);
   view = $state<View>("games");
   grid = $state(prefs.grid);
 
   current = $derived(this.presets.find((p) => p.slot === this.active));
   readOnly = $derived(this.active === "Normal");
+  /** Bits per channel the outputs carry; 8 until the driver has answered. */
+  outputBits = $derived(this.status?.output_bits ?? 8);
   vendor = $derived(this.status?.vendor ?? null);
   vibranceMax = $derived(this.status?.vibrance?.max ?? 100);
   vibranceMin = $derived(this.status?.vibrance?.min ?? 0);
@@ -110,7 +112,7 @@ class AppStore {
   }
   async #refreshShades() {
     try {
-      this.shades = await countShades($state.snapshot(this.dials));
+      this.shades = await countShades($state.snapshot(this.dials), this.outputBits);
     } catch (e) {
       toast.error(`✕ SHADES READOUT · ${reason(e)}`);
     }
@@ -143,6 +145,8 @@ class AppStore {
       const p = this.presets.find((x) => x.slot === this.active);
       if (p) this.#loadInto(p);
       this.status = await getStatus();
+      // The first count ran before the output depth was known.
+      void this.#refreshShades();
       this.inFront = await getInFront();
       this.monitor = await primaryMonitor();
     } catch (e) {
