@@ -19,6 +19,10 @@ pub struct VibranceScale {
     pub default: i32,
 }
 
+/// Slot key of the fixed, read-only native baseline. Never stored with dials
+/// that matter: selecting it restores each monitor's own native color.
+pub const NORMAL_SLOT: &str = "Normal";
+
 /// Legacy export files predate the scale stamp. They all came from NVIDIA
 /// machines whose GetDVCInfoEx reports 0..=100 default 50 (measured live on
 /// the dev machine — NOT the "0..63" folklore scale).
