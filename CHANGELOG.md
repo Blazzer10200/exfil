@@ -30,11 +30,22 @@ All notable changes to EXFIL. Earlier releases are described in their git tags.
   modules, the frontend lost its unused options, and CI now runs the
   typecheck, rustfmt, clippy and the unit tests on every push.
 
+- **Security updates.** Tauri 2.12 and its plugins, with the patched `zip`
+  (updater) and `rustls` (TLS) libraries.
+- Lighter in the background: the in-front lookup no longer builds a list of
+  every running process, and re-applying the preset that is already active no
+  longer rewrites `presets.json`.
+
 ### Fixed
 - **A damaged `presets.json` is no longer overwritten.** If the file can't be
   read or parsed, EXFIL keeps a copy as `presets.json.bad` before starting
   from defaults, and it repairs a file with a missing Normal preset or a
   reused preset key.
+- **A `presets.json` locked by another program at startup is safe too.** EXFIL
+  retries the read, and if it still can't read or copy the file it refuses to
+  save over it and says so.
+- Two harmless Content Security Policy errors no longer show up in the console
+  on every launch.
 - **Quitting could leave a preset's gamma on screen.** The once-a-second
   re-apply could run between the exit reset and the process ending and write
   the old ramp back.

@@ -84,11 +84,12 @@ impl AppState {
     /// per-monitor default vibrance); other slots stamp their stored dials +
     /// vibrance.
     pub fn apply_slot(&self, slot: &str) -> Result<Preset, String> {
-        let preset = {
+        let (preset, changed) = {
             let mut s = lock(&self.store);
             let p = s.get(slot).cloned().ok_or("unknown slot")?;
+            let changed = s.active != slot;
             s.active = slot.to_string();
-            p
+            (p, changed)
         };
         if slot == NORMAL_SLOT {
             gamma::reset()?;
@@ -98,8 +99,12 @@ impl AppState {
         } else {
             self.apply_color(preset.dials, preset.vibrance)?;
         }
-        if let Err(e) = lock(&self.store).save() {
-            log::warn!("failed to persist preset store after apply: {e}");
+        // Re-applying the slot that is already active (the watcher's first tick
+        // at boot, a repeat pick) changes nothing worth writing to disk.
+        if changed {
+            if let Err(e) = lock(&self.store).save() {
+                log::warn!("failed to persist preset store after apply: {e}");
+            }
         }
         Ok(preset)
     }

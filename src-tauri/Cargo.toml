@@ -31,7 +31,7 @@ env_logger = "0.11"
 # NVAPI digital vibrance via raw nvapi64.dll QueryInterface (no DLL injection —
 # all writes go through the display driver, BattlEye/EAC-safe).
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
   "Win32_UI_ColorSystem",

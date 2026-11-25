@@ -5,7 +5,8 @@
 
 use std::collections::HashSet;
 
-use windows::Win32::Foundation::{CloseHandle, BOOL, HWND, LPARAM};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
@@ -18,50 +19,57 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 /// Lowercased exe basenames of every running process.
 pub fn running_exes() -> HashSet<String> {
-    process_list().into_iter().map(|(_, name)| name).collect()
+    let mut out = HashSet::new();
+    each_process(|_, name| {
+        if let Some(name) = exe_name(name) {
+            out.insert(name);
+        }
+        true
+    });
+    out
 }
 
 /// Exe basename (lowercased) of one pid, via the same read-only snapshot —
 /// deliberately NOT OpenProcess, so the foreground tracker never opens a handle
 /// on an anti-cheat-protected game while it polls the foreground window.
 pub fn exe_for_pid(pid: u32) -> Option<String> {
-    process_list()
-        .into_iter()
-        .find(|(p, _)| *p == pid)
-        .map(|(_, name)| name)
+    let mut found = None;
+    each_process(|p, name| {
+        if p != pid {
+            return true;
+        }
+        found = exe_name(name);
+        false
+    });
+    found
 }
 
-/// Snapshot of running processes as (pid, lowercased exe basename).
-fn process_list() -> Vec<(u32, String)> {
-    let mut out = Vec::new();
+/// Lowercased exe basename from a snapshot entry's NUL-terminated name.
+fn exe_name(raw: &[u16]) -> Option<String> {
+    let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
+    let name = String::from_utf16_lossy(raw.get(..end)?).to_lowercase();
+    (!name.is_empty()).then_some(name)
+}
+
+/// Walk one snapshot of the running processes, handing `visit` each pid and
+/// raw exe name until it returns false. Names are only decoded by the caller,
+/// so a single-pid lookup allocates nothing for the processes it skips.
+fn each_process(mut visit: impl FnMut(u32, &[u16]) -> bool) {
     unsafe {
-        let snap = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
-            Ok(h) => h,
-            Err(_) => return out,
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return;
         };
         let mut entry = PROCESSENTRY32W {
             dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
         };
         if Process32FirstW(snap, &mut entry).is_ok() {
-            loop {
-                let end = entry
-                    .szExeFile
-                    .iter()
-                    .position(|&c| c == 0)
-                    .unwrap_or(entry.szExeFile.len());
-                let name = String::from_utf16_lossy(&entry.szExeFile[..end]).to_lowercase();
-                if !name.is_empty() {
-                    out.push((entry.th32ProcessID, name));
-                }
-                if Process32NextW(snap, &mut entry).is_err() {
-                    break;
-                }
-            }
+            while visit(entry.th32ProcessID, &entry.szExeFile)
+                && Process32NextW(snap, &mut entry).is_ok()
+            {}
         }
         let _: windows::core::Result<()> = CloseHandle(snap);
     }
-    out
 }
 
 /// A program the user can bind a preset to, surfaced in the picker.

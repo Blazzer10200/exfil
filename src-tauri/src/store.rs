@@ -6,6 +6,7 @@
 use crate::gamma::ColorDials;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A vendor's vibrance level range, stamped into export files so imports on a
 /// machine with a DIFFERENT GPU/driver can rescale values. Ranges are whatever
@@ -144,6 +145,19 @@ fn store_path() -> PathBuf {
     base.join("exfil-v2").join("presets.json")
 }
 
+/// Set when presets.json existed at startup but could be neither read nor
+/// copied aside. While set, `save()` must not replace the file.
+static UNSAVED_ORIGINAL: AtomicBool = AtomicBool::new(false);
+
+/// Copy an unreadable presets.json to `presets.json.bad`. A file that is gone
+/// counts as done: there is nothing left to protect.
+fn backup_unreadable(path: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::copy(path, path.with_extension("json.bad")) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 impl PresetStore {
     /// Load presets.json. A missing file is the normal first run. A file that
     /// exists but can't be read or parsed is copied to `presets.json.bad`
@@ -151,7 +165,19 @@ impl PresetStore {
     /// overwrite the only copy of the user's presets.
     pub fn load() -> Self {
         let path = store_path();
-        let failure = match std::fs::read_to_string(&path) {
+        // Another program (antivirus, a backup tool) can hold the file for a
+        // moment at boot, so a failed read is retried before giving up.
+        let mut read = std::fs::read_to_string(&path);
+        for _ in 0..5 {
+            match &read {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    read = std::fs::read_to_string(&path);
+                }
+                _ => break,
+            }
+        }
+        let failure = match read {
             Ok(s) => match serde_json::from_str::<PresetStore>(&s) {
                 Ok(store) => return store.normalized(),
                 Err(e) => format!("parse failed ({e})"),
@@ -159,13 +185,14 @@ impl PresetStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return PresetStore::default(),
             Err(e) => format!("read failed ({e})"),
         };
-        let backup = path.with_extension("json.bad");
-        match std::fs::copy(&path, &backup) {
-            Ok(_) => log::warn!(
-                "presets.json {failure}; kept a copy at {}",
-                backup.display()
-            ),
-            Err(e) => log::warn!("presets.json {failure}; backup also failed ({e})"),
+        match backup_unreadable(&path) {
+            Ok(()) => log::warn!("presets.json {failure}; kept a copy as presets.json.bad"),
+            Err(e) => {
+                // No copy exists yet, so saving now would destroy the user's
+                // presets. save() refuses until the copy can be made.
+                UNSAVED_ORIGINAL.store(true, Ordering::Relaxed);
+                log::warn!("presets.json {failure}; backup also failed ({e})");
+            }
         }
         PresetStore::default()
     }
@@ -198,6 +225,12 @@ impl PresetStore {
 
     pub fn save(&self) -> Result<(), String> {
         let path = store_path();
+        if UNSAVED_ORIGINAL.load(Ordering::Relaxed) {
+            backup_unreadable(&path).map_err(|e| {
+                format!("presets.json could not be read at startup and is still locked ({e}); not overwriting it")
+            })?;
+            UNSAVED_ORIGINAL.store(false, Ordering::Relaxed);
+        }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }

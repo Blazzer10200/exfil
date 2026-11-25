@@ -1,5 +1,5 @@
 // Typed wrappers over the Tauri backend commands. Mirrors the Rust signatures
-// in src-tauri/src/lib.rs — keep in sync.
+// in src-tauri/src/commands.rs (plus hotkeys, tray, updater) — keep in sync.
 
 import { invoke } from "@tauri-apps/api/core";
 
